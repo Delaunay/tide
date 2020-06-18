@@ -116,7 +116,7 @@ class Interactive(Module):
 
 #  mod Constructor(Expression, [Field(expr, body)])
 @dataclass
-class Expression(Module):
+class ExpressionN(Module):
     body: Expression
 
 
