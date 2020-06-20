@@ -1,32 +1,8 @@
 #include <vector>
 #include <memory>
 #include <algorithm>
-#include <spdlog/fmt/bundled/core.h>
 
-
-// Exception that shows the backtrace when .what() is called
-class Exception: public std::exception{
-public:
-    template<typename ... Args>
-    Exception(const char* fmt, const Args& ... args):
-        message(fmt::format(fmt, args...))
-    {}
-
-    const char* what() const noexcept final { return message.c_str(); }
-
-private:
-    std::string message;
-};
-
-
-class ValueError: public Exception {
-public:
-    template<typename ... Args>
-    ValueError(const char* fmt, const Args& ... args):
-        Exception(fmt, args...)
-    {}
-};
-
+#include "exception.h"
 
 struct Slice {
     int start;
@@ -55,6 +31,43 @@ int len(Iterable const& iter) {
     return iter.__len__();
 }
 
+// Python List Interface
+template<typename Impl, typename T>
+struct ListInterface {
+public:
+    using Iterator = typename Impl::Iterator;
+    using ConstIterator = typename Impl::ConstIterator;
+
+#define LIST_METHODS(impl)\
+    void          remove     (T v)         { return (impl).remove(v); }\
+    T             pop        ()            { return (impl).pop();}\
+    T             pop        (int i)       { return (impl).pop(i);}\
+    void          clear      ()            { return (impl).clear();}\
+    void          insert     (int i, T v)  { return (impl).insert(i, v);}\
+    int           count      (T x)   const { return (impl).count(x);}\
+    void          sort       ()            { return (impl).sort(); }\
+    void          reverse    ()            {        (impl).reverse();}\
+    void          copy       ()            {        (impl).copy();}\
+    Iterator      begin      ()            { return (impl).begin(); }\
+    Iterator      end        ()            { return (impl).end();   }\
+    ConstIterator begin      ()      const { return (impl).begin(); }\
+    ConstIterator end        ()      const { return (impl).end();   }\
+    Iterator      rbegin     ()            { return (impl).rbegin(); }\
+    Iterator      rend       ()            { return (impl).rend();   }\
+    ConstIterator rbegin     ()      const { return (impl).rbegin(); }\
+    ConstIterator rend       ()      const { return (impl).rend();   }\
+    void          append     (T v)         {        (impl).append(v);   }\
+    T&            operator[] (int i) const { return (impl)[i]; }\
+    T&            operator[] (int i)       { return (impl)[i]; }\
+    int           __len__    ()      const { return (impl).__len__(); }\
+    template<typename Iterable>\
+    void          extend(Iterable const& iterable) { (impl).extend(iterable); }\
+    int           index (T x, int start = 0, int end = 0) const {return (impl).index(x, start, end);}
+
+    LIST_METHODS(*reinterpret_cast<Impl*>(this))
+};
+
+// Implementation of Python list using std::vector
 template<typename T>
 struct VectorList {
 public:
@@ -134,6 +147,12 @@ public:
     ConstIterator begin() const { return std::begin(_data); }
     ConstIterator end()   const { return std::end(_data);   }
 
+    Iterator rbegin() { return std::rbegin(_data); }
+    Iterator rend()   { return std::rend(_data);   }
+
+    ConstIterator rbegin() const { return std::rbegin(_data); }
+    ConstIterator rend()   const { return std::rend(_data);   }
+
     void append     (T v)         { _data.push_back(v); }
     T&   operator[] (int i) const { return _data[i];     }
     T&   operator[] (int i)       { return _data[i];     }
@@ -146,51 +165,24 @@ private:
 };
 
 
+// Python list like Object that behaves like a reference
+// and not a value like VectorList
 template<typename Impl, typename T>
-struct ListInterface {
-public:
+struct ListRef {
     using Iterator = typename Impl::Iterator;
     using ConstIterator = typename Impl::ConstIterator;
 
-#define LIST_METHODS(impl)\
-    void          remove     (T v)         { return (impl).remove(v); }\
-    T             pop        ()            { return (impl).pop();}\
-    T             pop        (int i)       { return (impl).pop(i);}\
-    void          clear      ()            { return (impl).clear();}\
-    void          insert     (int i, T v)  { return (impl).insert(i, v);}\
-    int           count      (T x)   const { return (impl).count(x);}\
-    void          sort       ()            { return (impl).sort(); }\
-    void          reverse    ()            {        (impl).reverse();}\
-    void          copy       ()            {        (impl).copy();}\
-    Iterator      begin      ()            { return (impl).begin(); }\
-    Iterator      end        ()            { return (impl).end();   }\
-    ConstIterator begin      ()      const { return (impl).begin(); }\
-    ConstIterator end        ()      const { return (impl).end();   }\
-    void          append     (T v)         {        (impl).append(v);   }\
-    T&            operator[] (int i) const { return (impl)[i]; }\
-    T&            operator[] (int i)       { return (impl)[i]; }\
-    int           __len__    ()      const { return (impl).__len__(); }\
-    template<typename Iterable>\
-    void          extend(Iterable const& iterable) { (impl).extend(iterable); }\
-    int           index (T x, int start = 0, int end = 0) const {return (impl).index(x, start, end);}
-
-    LIST_METHODS(*reinterpret_cast<Impl*>(this))
-private:
-};
-
-
-// Make it ref semantic like Python
-template<typename T>
-struct list {
-    using Iterator = typename VectorList<T>::Iterator;
-    using ConstIterator = typename VectorList<T>::ConstIterator;
-
-    list(): _data(std::make_shared<VectorList<T>>())
+    ListRef(): _data(std::make_shared<Impl>())
     {}
 
     LIST_METHODS(*_data)
 
 private:
-    std::shared_ptr<VectorList<T>> _data;
+    std::shared_ptr<Impl> _data;
 };
+
+// This is what the user should be interfacing with
+// to get the Python experience
+template<typename T>
+using list = ListRef<VectorList<T>, T>;
 

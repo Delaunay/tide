@@ -8,8 +8,10 @@
 //        REQUIRE(strip(lex_it(code())) == strip(code()));\
 //    }
 
-
-
+template<typename T>
+void mutate_list(list<T> val){
+    val.append(10);
+}
 
 template<typename T>
 void check_append(){
@@ -63,6 +65,10 @@ void check_append(){
     // clear
     array.clear();
     REQUIRE(len(array) == 0);
+
+    // Array is a reference not a value
+    mutate_list(array);
+    REQUIRE(sum(array) == T(10));
 }
 
 
