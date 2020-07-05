@@ -1,6 +1,9 @@
 #include <catch2/catch.hpp>
 #include <iterator>
 
+#include <iostream>
+
+
 #include "list.h"
 
 //#define TEST_LEXING(code)\
@@ -14,7 +17,7 @@ void mutate_list(list<T> val){
 }
 
 template<typename T>
-void check_append(){
+void check_list(){
     list<T> array;
 
     for(auto i = 9; i >= 0; --i){
@@ -69,9 +72,11 @@ void check_append(){
     // Array is a reference not a value
     mutate_list(array);
     REQUIRE(sum(array) == T(10));
+
+    std::cout << repr(array) << "\n";
 }
 
 
 TEST_CASE("list"){
-    check_append<int>();
+    check_list<int>();
 }

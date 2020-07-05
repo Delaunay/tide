@@ -43,6 +43,7 @@ ENDMACRO(TEST_MACRO)
 # add test here
 # file_name_test.cpp ==> CBTEST_MACRO(file_name)
 TEST_MACRO(list)
+TEST_MACRO(dict)
 
 #ADD_TEST(
 #    NAME lythonMain

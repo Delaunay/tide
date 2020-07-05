@@ -1,5 +1,9 @@
+#ifndef KIWI_EXCEPTION_HEADER
+#define KIWI_EXCEPTION_HEADER
+
 #include <spdlog/fmt/bundled/core.h>
 
+#define INLINE inline
 
 // Exception that shows the backtrace when .what() is called
 class Exception: public std::exception{
@@ -22,3 +26,5 @@ public:
         Exception(fmt, args...)
     {}
 };
+
+#endif

@@ -1,6 +1,6 @@
 export CORES=6
 
-travis: travis-install travis-doc
+travis: travis-install travis-doc build-cpp tests-cpp
 
 travis-install:
 	pip install -e .
@@ -15,7 +15,6 @@ rm-doc:
 	rm -rf _build
 
 build-doc:
-	# sphinx-apidoc -e -o docs/api tide
 	sphinx-build -W --color -c docs/ -b html docs/ _build/html
 
 serve-doc:
@@ -24,3 +23,14 @@ serve-doc:
 update-doc: build-doc serve-doc
 
 yolo: rm-doc build-doc serve-doc
+
+build-cpp:
+	mkdir -p build
+	cd build
+	CXX=g++-8 CC=gcc-8 cmake ..
+	make -j $CORES
+
+tests-cpp: build-cpp
+	make coverage
+
+

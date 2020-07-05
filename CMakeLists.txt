@@ -109,7 +109,7 @@ ADD_CUSTOM_TARGET(enable-test
 # Some IDEs need the files to be inside a cmake target to be displayed
 
 ADD_CUSTOM_TARGET(zothers ALL SOURCES
-    README.md
+    README.rst
     .travis.yml
     .gitignore
     .gitmodules

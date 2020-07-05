@@ -1,6 +1,10 @@
+#ifndef KIWI_LIST_HEADER
+#define KIWI_LIST_HEADER
 #include <vector>
 #include <memory>
 #include <algorithm>
+#include <string>
+#include <sstream>
 
 #include "exception.h"
 
@@ -13,6 +17,8 @@ struct Slice {
         start(s), end(e), step(step)
    {}
 };
+
+using String = std::string;
 
 template<typename Iterable>
 using IteratorValue = typename Iterable::Iterator::value_type;
@@ -31,6 +37,42 @@ int len(Iterable const& iter) {
     return iter.__len__();
 }
 
+template<typename Iterable, typename K>
+int contains(Iterable const& iter, K const& k) {
+    return iter.__contains__(k);
+}
+
+template<typename T>
+String repr(T const& obj){
+    return obj.__repr__();
+}
+
+template<>
+String repr(int const& obj){
+    return std::to_string(obj);
+}
+
+template<>
+String repr(float const& obj){
+    return std::to_string(obj);
+}
+
+template<>
+String repr(String const& obj){
+    return obj;
+}
+
+// Python like Generator that can be used in a for range loop
+//template<typename T>
+//struct Generator {
+//    using Iterator = typename T::iterator;
+//
+//    Iterator begin() { return std::begin(data); }
+//    Iterator end()   { return std::end(data);   }
+//
+//    T& data;
+//};
+
 // Python List Interface
 template<typename Impl, typename T>
 struct ListInterface {
@@ -39,30 +81,31 @@ public:
     using ConstIterator = typename Impl::ConstIterator;
 
 #define LIST_METHODS(impl)\
-    void          remove     (T v)         { return (impl).remove(v); }\
-    T             pop        ()            { return (impl).pop();}\
-    T             pop        (int i)       { return (impl).pop(i);}\
-    void          clear      ()            { return (impl).clear();}\
-    void          insert     (int i, T v)  { return (impl).insert(i, v);}\
-    int           count      (T x)   const { return (impl).count(x);}\
-    void          sort       ()            { return (impl).sort(); }\
-    void          reverse    ()            {        (impl).reverse();}\
-    void          copy       ()            {        (impl).copy();}\
-    Iterator      begin      ()            { return (impl).begin(); }\
-    Iterator      end        ()            { return (impl).end();   }\
-    ConstIterator begin      ()      const { return (impl).begin(); }\
-    ConstIterator end        ()      const { return (impl).end();   }\
-    Iterator      rbegin     ()            { return (impl).rbegin(); }\
-    Iterator      rend       ()            { return (impl).rend();   }\
-    ConstIterator rbegin     ()      const { return (impl).rbegin(); }\
-    ConstIterator rend       ()      const { return (impl).rend();   }\
-    void          append     (T v)         {        (impl).append(v);   }\
-    T&            operator[] (int i) const { return (impl)[i]; }\
-    T&            operator[] (int i)       { return (impl)[i]; }\
-    int           __len__    ()      const { return (impl).__len__(); }\
+    INLINE void          remove     (T v)         { return (impl).remove(v);}\
+    INLINE T             pop        ()            { return (impl).pop();    }\
+    INLINE T             pop        (int i)       { return (impl).pop(i);   }\
+    INLINE void          clear      ()            { return (impl).clear();  }\
+    INLINE void          insert     (int i, T v)  { return (impl).insert(i, v);}\
+    INLINE int           count      (T x)   const { return (impl).count(x); }\
+    INLINE void          sort       ()            { return (impl).sort();   }\
+    INLINE void          reverse    ()            {        (impl).reverse();}\
+    INLINE void          copy       ()            {        (impl).copy();   }\
+    INLINE Iterator      begin      ()            { return (impl).begin();  }\
+    INLINE Iterator      end        ()            { return (impl).end();    }\
+    INLINE ConstIterator begin      ()      const { return (impl).begin();  }\
+    INLINE ConstIterator end        ()      const { return (impl).end();    }\
+    INLINE Iterator      rbegin     ()            { return (impl).rbegin(); }\
+    INLINE Iterator      rend       ()            { return (impl).rend();   }\
+    INLINE ConstIterator rbegin     ()      const { return (impl).rbegin(); }\
+    INLINE ConstIterator rend       ()      const { return (impl).rend();   }\
+    INLINE void          append     (T v)         {        (impl).append(v);}\
+    INLINE T&            operator[] (int i) const { return (impl)[i];       }\
+    INLINE T&            operator[] (int i)       { return (impl)[i];       }\
+    INLINE String        __repr__   ()      const { return (impl).__repr__(); }\
+    INLINE int           __len__    ()      const { return (impl).__len__(); }\
     template<typename Iterable>\
-    void          extend(Iterable const& iterable) { (impl).extend(iterable); }\
-    int           index (T x, int start = 0, int end = 0) const {return (impl).index(x, start, end);}
+    INLINE void          extend(Iterable const& iterable) { (impl).extend(iterable); }\
+    INLINE int           index (T x, int start = 0, int end = 0) const {return (impl).index(x, start, end);}
 
     LIST_METHODS(*reinterpret_cast<Impl*>(this))
 };
@@ -72,8 +115,25 @@ template<typename T>
 struct VectorList {
 public:
     template<typename Iterable>
-    void extend(Iterable const& iterable) {
+    INLINE void extend(Iterable const& iterable) {
         _data.insert(_data.end(), std::begin(iterable), std::end(iterable));
+    }
+
+    String        __repr__   ()      const {
+        std::stringstream ss;
+        ss << "[";
+        bool first = true;
+        for (auto& item: *this){
+            if (!first){
+                ss << ", ";
+            } else {
+                first = false;
+            }
+
+            ss << repr(item);
+        }
+        ss << "]";
+        return ss.str();
     }
 
     void remove(T v) {
@@ -102,7 +162,7 @@ public:
         return val;
     }
 
-    void clear() {
+    INLINE void clear() {
         _data.clear();
     }
 
@@ -123,15 +183,15 @@ public:
         return it - std::begin(_data);
     }
 
-    void insert(int i, T v) {
+    INLINE void insert(int i, T v) {
         _data.insert(std::begin(_data) + i, v);
     }
 
-    int count(T x) const {
+    INLINE int count(T x) const {
         return std::count(std::begin(_data), std::end(_data), x);
     }
 
-    void sort() {
+    INLINE void sort() {
         std::sort(std::begin(_data), std::end(_data));
     }
 
@@ -140,25 +200,29 @@ public:
     void copy() {}
 
     using Iterator = typename std::vector<T>::iterator;
-    Iterator begin() { return std::begin(_data); }
-    Iterator end()   { return std::end(_data);   }
+    INLINE Iterator begin() { return std::begin(_data); }
+    INLINE Iterator end()   { return std::end(_data);   }
 
     using ConstIterator = typename std::vector<T>::const_iterator;
-    ConstIterator begin() const { return std::begin(_data); }
-    ConstIterator end()   const { return std::end(_data);   }
+    INLINE ConstIterator begin() const { return std::begin(_data); }
+    INLINE ConstIterator end()   const { return std::end(_data);   }
 
-    Iterator rbegin() { return std::rbegin(_data); }
-    Iterator rend()   { return std::rend(_data);   }
+    INLINE Iterator rbegin() { return std::rbegin(_data); }
+    INLINE Iterator rend()   { return std::rend(_data);   }
 
-    ConstIterator rbegin() const { return std::rbegin(_data); }
-    ConstIterator rend()   const { return std::rend(_data);   }
+    INLINE ConstIterator rbegin() const { return std::rbegin(_data); }
+    INLINE ConstIterator rend()   const { return std::rend(_data);   }
 
-    void append     (T v)         { _data.push_back(v); }
-    T&   operator[] (int i) const { return _data[i];     }
-    T&   operator[] (int i)       { return _data[i];     }
+    INLINE void append     (T v)         { _data.push_back(v); }
+    INLINE T&   operator[] (int i) const { return _data[i];     }
+    INLINE T&   operator[] (int i)       { return _data[i];     }
 
-    int __len__() const {
+    INLINE int __len__() const {
         return _data.size();
+    }
+
+    bool is_none() {
+        return bool(_data);
     }
 private:
     std::vector<T> _data;
@@ -177,6 +241,10 @@ struct ListRef {
 
     LIST_METHODS(*_data)
 
+    bool is_none() {
+        return bool(_data);
+    }
+
 private:
     std::shared_ptr<Impl> _data;
 };
@@ -186,3 +254,4 @@ private:
 template<typename T>
 using list = ListRef<VectorList<T>, T>;
 
+#endif
