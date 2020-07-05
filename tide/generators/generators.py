@@ -1,7 +1,7 @@
 import ast
 
-from tide.visitor import NodeVisitor
-from tide.nodes import *
+from tide.generators.visitor import NodeVisitor
+from tide.generators.nodes import *
 from tide.log import debug, warning
 
 
