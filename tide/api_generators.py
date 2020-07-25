@@ -1,5 +1,5 @@
 import clang.cindex
-from clang.cindex import Cursor, CursorKind, Type
+from clang.cindex import Cursor, CursorKind, Type, SourceLocation
 
 index = clang.cindex.Index.create()
 tu = index.parse('/usr/include/SDL2/SDL.h')
@@ -12,12 +12,26 @@ decl = {
 }
 
 
-class Delayed:
-    def __init__(self, fun):
-        self.fun = fun
+def show_elem(elem: Cursor):
+    print(elem.kind)
+    for attr_name in dir(elem):
+        if attr_name.startswith('__'):
+            continue
 
-    def __call__(self, *args, **kwargs):
-        return self.fun(*args, **kwargs)
+        try:
+            attr = getattr(elem, attr_name)
+        except:
+            continue
+
+        if callable(attr):
+            v = None
+            try:
+                v = attr()
+            except:
+                pass
+            print('   ', attr_name, v)
+        else:
+            print('   ', attr_name, attr)
 
 
 def generate_function(elem: Cursor):
@@ -39,8 +53,7 @@ def generate_function(elem: Cursor):
     funnane = definition.spelling
     pyargs = ', '.join(pyargs)
 
-
-
+    comment = get_comment(elem)
     return f'\ndef {funnane}({pyargs}) -> {rtype}:\n{comment}    pass\n'
 
 
@@ -67,6 +80,13 @@ def get_name(elem, rename=None):
         pyname = ''
 
     return pyname
+
+
+def get_comment(elem, indent='    '):
+    comment = ''
+    if elem.brief_comment:
+        comment = f'{indent}"""{elem.brief_comment}"""\n'
+    return comment
 
 
 def find_anonymous_fields(elem):
@@ -123,27 +143,57 @@ def generate_struct_union(elem: Cursor, depth=1, nested=False, rename=None):
     if not attrs:
         attrs = 'pass'
 
-    comment = ''
-    if elem.brief_comment:
-        comment = f'{indent}"""{elem.brief_comment}"""\n'
-
+    comment = get_comment(elem, indent)
     return f'\n{base}@{dataclass_type}\n{base}class {pyname}:\n{comment}{indent}{attrs}\n'
 
 
+def generate_enum(elem: Cursor):
+    name = get_name(elem)
+
+    values = []
+    for value in elem.get_children():
+        if value.kind == CursorKind.ENUM_CONSTANT_DECL:
+            values.append(f'{get_name(value)} = {value.enum_value}')
+        else:
+            print('ERROR')
+            show_elem(value)
+
+    values = '\n'.join(values)
+    return f"\nclass {name}(enum):\n    pass\n\n{values}\n"
+
+
 for elem in tu.cursor.get_children():
+    loc: SourceLocation = elem.location
+
+    if not str(loc.file.name).startswith('/usr/include/SDL2'):
+        continue
+
+    # print(f'# {loc.file.name}')
 
     if elem.kind == CursorKind.FUNCTION_DECL:
         fun = generate_function(elem)
-        print("F", fun)
+        print(fun)
 
     elif elem.kind in (CursorKind.STRUCT_DECL, CursorKind.UNION_DECL):
         struct = generate_struct_union(elem)
-        print("S", struct)
+        print(struct)
 
     elif elem.kind == CursorKind.TYPEDEF_DECL:
-        pass
-        # print('typedef', elem.displayname, elem.type.spelling, elem.result_type.spelling)
+        t1 = elem.type
+        t2 = elem.underlying_typedef_type
+
+        # SDL_version = struct SDL_version
+        if t1.spelling == t2.spelling.split(' ')[-1]:
+            continue
+
+        print(f'{t1.spelling} = {t2.spelling}')
+    elif elem.kind == CursorKind.ENUM_DECL:
+        enum = generate_enum(elem)
+        print(enum)
+
+    # Global variables
+    elif elem.kind == CursorKind.VAR_DECL:
+        print(f'{elem.spelling}: {get_name(elem.type)}')
     else:
-        if elem.kind is not None:
-            print(elem.kind)
+        show_elem(elem)
 
