@@ -46,8 +46,6 @@ class Font:
 
     def destroy(self):
         if self.handle is not None:
-            info(f'deleting font {self.handle}')
-
             # free = False
             # if not TTF_WasInit():
             #     TTF_Init()
@@ -84,6 +82,19 @@ class Font:
         surface = TTF_RenderUTF8_Blended(self.handle, text.encode('utf-8'), color)
         return surface
 
+    def size(self, text):
+        w, h = c_int(), c_int()
+        TTF_SizeUTF8(self.handle, text.encode('utf-8'), w, h)
+        return w, h
+
+    def glyph_width(self):
+        w, _ = self.size(' ')
+        return w
+
+    def glyph_height(self):
+        _, h = self.size(' ')
+        return h
+
 
 class Renderer:
     def __init__(self, handle):
@@ -94,7 +105,6 @@ class Renderer:
 
     def destroy(self):
         if self.handle is not None:
-            info(f'deleting renderer {self.handle}')
             SDL_DestroyRenderer(self.handle)
             self.handle = None
 
@@ -160,7 +170,6 @@ class ResourceManager:
         for font in self.fonts.values():
             font.destroy()
 
-        info(f'Shutting down TTF')
         TTF_Quit()
 
     def font(self, name, size):
@@ -193,7 +202,6 @@ class Window:
             self._renderer.destroy()
 
         if self.handle is not None:
-            info(f'deleting window {self.handle}')
             SDL_DestroyWindow(self.handle)
             self.handle = None
 
@@ -214,6 +222,14 @@ class Window:
     def __del__(self):
         self.destroy()
 
+    @property
+    def title(self):
+        return SDL_GetWindowTitle(self.handle)
+
+    @title.setter
+    def title(self, name):
+        SDL_SetWindowTitle(name)
+
 
 class WindowManager:
     def __init__(self):
@@ -232,17 +248,15 @@ class WindowManager:
     def __exit__(self, exc_type, exc_val, exc_tb):
         for window in self.windows.values():
             window.destroy()
-
-        info(f'Shutting down SDL')
         SDL_Quit()
 
-    def new_window(self, *args, **kwargs):
+    def new_window(self, w=1280, h=720, *args, **kwargs):
         handle = SDL_CreateWindow(
             b"Hello World",
             SDL_WINDOWPOS_UNDEFINED,
             SDL_WINDOWPOS_UNDEFINED,
-            592,
-            460,
+            w,
+            h,
             SDL_WINDOW_SHOWN)
 
         window = Window(handle)
@@ -274,16 +288,17 @@ class WindowManager:
 
 class Text:
     def __init__(self, string, color, font):
+        self.x = 0
+        self.y = 0
+        self.w = 100
+        self.h = 100
+
         self.color = SDL_Color(*color)
         self.font = font
 
         self.surface = None
         self.texture = None
         self.string = string
-        self.x = 0
-        self.y = 0
-        self.w = 100
-        self.h = 100
 
     @property
     def string(self):
@@ -294,16 +309,15 @@ class Text:
         self.destroy()
         self.surface = self.font.render(string, self.color)
         self._string = string
+        self.w, self.h = self.font.size(self._string)
 
     def _delete_surface(self):
         if self.surface is not None:
-            info(f'deleting surface {self.surface}')
             SDL_FreeSurface(self.surface)
             self.surface = None
 
     def _delete_texture(self):
         if self.texture is not None:
-            info(f'deleting texture {self.texture}')
             SDL_DestroyTexture(self.texture)
             self.texture = None
 
@@ -317,7 +331,6 @@ class Text:
     def _texture(self, renderer):
         if self.texture is None:
             self.texture = check(renderer.create_texture(self.surface))
-
         return self.texture
 
     def render(self, renderer):

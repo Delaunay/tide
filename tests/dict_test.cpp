@@ -58,7 +58,6 @@ void check_dict(){
         REQUIRE(val == 2);
     }
 
-
     for (auto& item: data.items()){
         std::cout << std::get<0>(item) << " "
                   << std::get<1>(item) << "\n";
