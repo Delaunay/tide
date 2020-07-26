@@ -1,5 +1,5 @@
 import clang.cindex
-from clang.cindex import Cursor, CursorKind, Type, SourceLocation
+from clang.cindex import Cursor, CursorKind, Type, SourceLocation, TypeKind
 
 index = clang.cindex.Index.create()
 tu = index.parse('/usr/include/SDL2/SDL.h')
@@ -10,6 +10,49 @@ decl = {
     # CursorKind.TYPEDEF_DECL,
     CursorKind.FUNCTION_DECL
 }
+
+
+def generate_type(type: Type):
+    if type.kind == TypeKind.VOID:
+        return 'None'
+
+    if type.kind == TypeKind.POINTER and type.get_pointee().kind == TypeKind.VOID:
+        return 'any'
+
+    if type.kind == TypeKind.POINTER:
+        pointee = type.get_pointee()
+
+        # in python every object is a pointer
+        if pointee.kind in (TypeKind.RECORD, TypeKind.FUNCTIONPROTO, TypeKind.UNEXPOSED):
+            return generate_type(pointee)
+
+        # for native types we need to keep ref because python will copy them
+        return f'Ref[{generate_type(pointee)}]'
+
+    if type.kind == TypeKind.CHAR_S:
+        return 'str'
+
+    if type.is_const_qualified():
+        typename = type.spelling.replace('const ', '')
+        return f'Const[{typename}]'
+
+    if type.kind == TypeKind.TYPEDEF:
+        return type.spelling
+
+    if type.kind == TypeKind.FUNCTIONPROTO or (type.kind == TypeKind.UNEXPOSED and type.get_canonical().kind == TypeKind.FUNCTIONPROTO):
+        canon = type.get_canonical()
+        rtype = canon.get_result()
+
+        args = []
+        for arg in canon.argument_types():
+            args.append(generate_type(arg))
+
+        args = ', '.join(args)
+        # show_elem(type.get_canonical())
+        return f'Callable[[{args}], {generate_type(rtype)}]'
+
+    # show_elem(type)
+    return type.spelling
 
 
 def show_elem(elem: Cursor):
@@ -29,7 +72,10 @@ def show_elem(elem: Cursor):
                 v = attr()
             except:
                 pass
-            print('   ', attr_name, v)
+            k = None
+            if hasattr(v, 'kind'):
+                k = v.kind
+            print('   ', attr_name, v, k)
         else:
             print('   ', attr_name, attr)
 
@@ -42,11 +88,11 @@ def generate_function(elem: Cursor):
 
     pyargs = []
 
-    rtype = definition.result_type.spelling
+    rtype = generate_type(definition.result_type)
     args = definition.get_arguments()
 
     for a in args:
-        atype = a.type.spelling
+        atype = generate_type(a.type)
         aname = a.displayname
         pyargs.append(f'{aname}: {atype}')
 
@@ -127,10 +173,11 @@ def generate_struct_union(elem: Cursor, depth=1, nested=False, rename=None):
         if attr.kind == CursorKind.FIELD_DECL:
             # Rename anonymous types
             uid = attr.type.get_declaration().get_usr()
+
             if uid in anonymous_renamed:
                 typename = anonymous_renamed[uid]
             else:
-                typename = get_name(attr.type)
+                typename = generate_type(attr.type)
 
             attrs.append(f'{attr.spelling}: {typename}')
 
@@ -186,14 +233,14 @@ for elem in tu.cursor.get_children():
         if t1.spelling == t2.spelling.split(' ')[-1]:
             continue
 
-        print(f'{t1.spelling} = {t2.spelling}')
+        print(f'{t1.spelling} = {generate_type(t2)}')
     elif elem.kind == CursorKind.ENUM_DECL:
         enum = generate_enum(elem)
         print(enum)
 
     # Global variables
     elif elem.kind == CursorKind.VAR_DECL:
-        print(f'{elem.spelling}: {get_name(elem.type)}')
+        print(f'{elem.spelling}: {generate_type(elem.type)}')
     else:
         show_elem(elem)
 
