@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from typing import *
+from dataclasses import dataclass, field
+from typing import Optional, List as ListT, Tuple as TupleT, Any
 
 
 Identifier = str
@@ -34,7 +34,7 @@ class ExpressionContext(Node):
 class Comprehension:
     target: Expression
     iter: Expression
-    ifs: List[Expression]
+    ifs: ListT[Expression]
     is_async: int
 
 
@@ -43,7 +43,7 @@ class Comprehension:
 class ExceptHandler:
     type: Optional[Expression]
     name: Optional[Identifier]
-    body: List[Statement]
+    body: ListT[Statement]
     lineno: int
     col_offset: int
     end_lineno: Optional[int]
@@ -52,26 +52,30 @@ class ExceptHandler:
 
 #  arg Product([Field(identifier, arg), Field(expr, annotation, opt=True), Field(string, type_comment, opt=True)], [Field(int, lineno), Field(int, col_offset), Field(int, end_lineno, opt=True), Field(int, end_col_offset, opt=True)])
 @dataclass
-class Arg:
+class arg:
     arg: Identifier
-    annotation: Optional[Expression]
-    type_comment: Optional[str]
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+    annotation: Optional[Expression] = None
+    type_comment: Optional[str] = None
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
 
+Arg = arg
 
 #  arguments Product([Field(arg, posonlyargs, seq=True), Field(arg, args, seq=True), Field(arg, vararg, opt=True), Field(arg, kwonlyargs, seq=True), Field(expr, kw_defaults, seq=True), Field(arg, kwarg, opt=True), Field(expr, defaults, seq=True)])
 @dataclass
-class Arguments:
-    posonlyargs: List[Arg]
-    args: List[Arg]
-    vararg: Optional[Arg]
-    kwonlyargs: List[Arg]
-    kw_defaults: List[Expression]
-    kwarg: Optional[Arg]
-    defaults: List[Expression]
+class arguments:
+    posonlyargs: ListT[Arg] = field(default_factory=list)
+    args: ListT[Arg] = field(default_factory=list)
+    vararg: Optional[Arg] = None
+    kwonlyargs: ListT[Arg] = field(default_factory=list)
+    kw_defaults: ListT[Expression] = field(default_factory=list)
+    kwarg: Optional[Arg] = None
+    defaults: ListT[Expression] = field(default_factory=list)
+
+
+Arguments = arguments
 
 #  keyword Product([Field(identifier, arg, opt=True), Field(expr, value)])
 @dataclass
@@ -104,14 +108,14 @@ class TypeIgnore:
 #  mod Constructor(Module, [Field(stmt, body, seq=True), Field(type_ignore, type_ignores, seq=True)])
 @dataclass
 class Module(Node):
-    body: List[Statement]
+    body: ListT[Statement]
     type_ignores = None
 
 
 #  mod Constructor(Interactive, [Field(stmt, body, seq=True)])
 @dataclass
 class Interactive(Module):
-    body: List[Statement]
+    body: ListT[Statement]
 
 
 #  mod Constructor(Expression, [Field(expr, body)])
@@ -123,29 +127,29 @@ class ExpressionN(Module):
 #  mod Constructor(FunctionType, [Field(expr, argtypes, seq=True), Field(expr, returns)])
 @dataclass
 class FunctionType(Module):
-    argtypes: List[Expression]
+    argtypes: ListT[Expression]
     returns: Expression
 
 
 #  mod Constructor(Suite, [Field(stmt, body, seq=True)])
 @dataclass
 class Suite(Module):
-    body: List[Statement]
+    body: ListT[Statement]
 
 
 #  stmt Constructor(FunctionDef, [Field(identifier, name), Field(arguments, args), Field(stmt, body, seq=True), Field(expr, decorator_list, seq=True), Field(expr, returns, opt=True), Field(string, type_comment, opt=True)])
 @dataclass
 class FunctionDef(Statement):
     name: Identifier
-    args: Arguments
-    body: List[Statement]
-    decorator_list: List[Expression]
-    returns: Optional[Expression]
-    type_comment: Optional[str]
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+    args: Arguments = field(default_factory=Arguments)
+    body: ListT[Statement] = field(default_factory=list)
+    decorator_list: ListT[Expression] = field(default_factory=list)
+    returns: Optional[Expression] = field(default_factory=list)
+    type_comment: Optional[str] = None
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
 
 
 #  stmt Constructor(AsyncFunctionDef, [Field(identifier, name), Field(arguments, args), Field(stmt, body, seq=True), Field(expr, decorator_list, seq=True), Field(expr, returns, opt=True), Field(string, type_comment, opt=True)])
@@ -153,8 +157,8 @@ class FunctionDef(Statement):
 class AsyncFunctionDef(Statement):
     name: Identifier
     args: Arguments
-    body: List[Statement]
-    decorator_list: List[Expression]
+    body: ListT[Statement]
+    decorator_list: ListT[Expression]
     returns: Optional[Expression]
     type_comment: Optional[str]
     lineno: int
@@ -167,14 +171,14 @@ class AsyncFunctionDef(Statement):
 @dataclass
 class ClassDef(Statement):
     name: Identifier
-    bases: List[Expression]
-    keywords: List[Keyword]
-    body: List[Statement]
-    decorator_list: List[Expression]
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+    bases: ListT[Expression] = field(default_factory=list)
+    keywords: ListT[Keyword] = field(default_factory=list)
+    body: ListT[Statement] = field(default_factory=list)
+    decorator_list: ListT[Expression] = field(default_factory=list)
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
 
 
 #  stmt Constructor(Return, [Field(expr, value, opt=True)])
@@ -190,7 +194,7 @@ class Return(Statement):
 #  stmt Constructor(Delete, [Field(expr, targets, seq=True)])
 @dataclass
 class Delete(Statement):
-    targets: List[Expression]
+    targets: ListT[Expression]
     lineno: int
     col_offset: int
     end_lineno: Optional[int]
@@ -200,13 +204,13 @@ class Delete(Statement):
 #  stmt Constructor(Assign, [Field(expr, targets, seq=True), Field(expr, value), Field(string, type_comment, opt=True)])
 @dataclass
 class Assign(Statement):
-    targets: List[Expression]
+    targets: ListT[Expression]
     value: Expression
-    type_comment: Optional[str]
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+    type_comment: Optional[str] = None
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
 
 
 #  stmt Constructor(AugAssign, [Field(expr, target), Field(operator, op), Field(expr, value)])
@@ -227,11 +231,11 @@ class AnnAssign(Statement):
     target: Expression
     annotation: Expression
     value: Optional[Expression]
-    simple: int
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+    simple: int = None
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
 
 
 #  stmt Constructor(For, [Field(expr, target), Field(expr, iter), Field(stmt, body, seq=True), Field(stmt, orelse, seq=True), Field(string, type_comment, opt=True)])
@@ -239,8 +243,8 @@ class AnnAssign(Statement):
 class For(Statement):
     target: Expression
     iter: Expression
-    body: List[Statement]
-    orelse: List[Statement]
+    body: ListT[Statement]
+    orelse: ListT[Statement]
     type_comment: Optional[str]
     lineno: int
     col_offset: int
@@ -253,8 +257,8 @@ class For(Statement):
 class AsyncFor(Statement):
     target: Expression
     iter: Expression
-    body: List[Statement]
-    orelse: List[Statement]
+    body: ListT[Statement]
+    orelse: ListT[Statement]
     type_comment: Optional[str]
     lineno: int
     col_offset: int
@@ -266,8 +270,8 @@ class AsyncFor(Statement):
 @dataclass
 class While(Statement):
     test: Expression
-    body: List[Statement]
-    orelse: List[Statement]
+    body: ListT[Statement]
+    orelse: ListT[Statement]
     lineno: int
     col_offset: int
     end_lineno: Optional[int]
@@ -278,8 +282,8 @@ class While(Statement):
 @dataclass
 class If(Statement):
     test: Expression
-    body: List[Statement]
-    orelse: List[Statement]
+    body: ListT[Statement]
+    orelse: ListT[Statement]
     lineno: int
     col_offset: int
     end_lineno: Optional[int]
@@ -289,8 +293,8 @@ class If(Statement):
 #  stmt Constructor(With, [Field(withitem, items, seq=True), Field(stmt, body, seq=True), Field(string, type_comment, opt=True)])
 @dataclass
 class With(Statement):
-    items: List[Withitem]
-    body: List[Statement]
+    items: ListT[Withitem]
+    body: ListT[Statement]
     type_comment: Optional[str]
     lineno: int
     col_offset: int
@@ -301,8 +305,8 @@ class With(Statement):
 #  stmt Constructor(AsyncWith, [Field(withitem, items, seq=True), Field(stmt, body, seq=True), Field(string, type_comment, opt=True)])
 @dataclass
 class AsyncWith(Statement):
-    items: List[Withitem]
-    body: List[Statement]
+    items: ListT[Withitem]
+    body: ListT[Statement]
     type_comment: Optional[str]
     lineno: int
     col_offset: int
@@ -324,10 +328,10 @@ class Raise(Statement):
 #  stmt Constructor(Try, [Field(stmt, body, seq=True), Field(excepthandler, handlers, seq=True), Field(stmt, orelse, seq=True), Field(stmt, finalbody, seq=True)])
 @dataclass
 class Try(Statement):
-    body: List[Statement]
+    body: ListT[Statement]
     handlers = None
-    orelse: List[Statement]
-    finalbody: List[Statement]
+    orelse: ListT[Statement]
+    finalbody: ListT[Statement]
     lineno: int
     col_offset: int
     end_lineno: Optional[int]
@@ -348,7 +352,7 @@ class Assert(Statement):
 #  stmt Constructor(Import, [Field(alias, names, seq=True)])
 @dataclass
 class Import(Statement):
-    names: List[Alias]
+    names: ListT[Alias]
     lineno: int
     col_offset: int
     end_lineno: Optional[int]
@@ -359,7 +363,7 @@ class Import(Statement):
 @dataclass
 class ImportFrom(Statement):
     module: Optional[Identifier]
-    names: List[Alias]
+    names: ListT[Alias]
     level: Optional[int]
     lineno: int
     col_offset: int
@@ -370,7 +374,7 @@ class ImportFrom(Statement):
 #  stmt Constructor(Global, [Field(identifier, names, seq=True)])
 @dataclass
 class Global(Statement):
-    names: List[Identifier]
+    names: ListT[Identifier]
     lineno: int
     col_offset: int
     end_lineno: Optional[int]
@@ -380,7 +384,7 @@ class Global(Statement):
 #  stmt Constructor(Nonlocal, [Field(identifier, names, seq=True)])
 @dataclass
 class Nonlocal(Statement):
-    names: List[Identifier]
+    names: ListT[Identifier]
     lineno: int
     col_offset: int
     end_lineno: Optional[int]
@@ -428,7 +432,7 @@ class Continue(Statement):
 @dataclass
 class BoolOp(Expression):
     op: 'BoolOp'
-    values: List[Expression]
+    values: ListT[Expression]
     lineno: int
     col_offset: int
     end_lineno: Optional[int]
@@ -495,8 +499,8 @@ class IfExp(Expression):
 #  expr Constructor(Dict, [Field(expr, keys, seq=True), Field(expr, values, seq=True)])
 @dataclass
 class Dict(Expression):
-    keys: List[Expression]
-    values: List[Expression]
+    keys: ListT[Expression]
+    values: ListT[Expression]
     lineno: int
     col_offset: int
     end_lineno: Optional[int]
@@ -506,7 +510,7 @@ class Dict(Expression):
 #  expr Constructor(Set, [Field(expr, elts, seq=True)])
 @dataclass
 class Set(Expression):
-    elts: List[Expression]
+    elts: ListT[Expression]
     lineno: int
     col_offset: int
     end_lineno: Optional[int]
@@ -517,7 +521,7 @@ class Set(Expression):
 @dataclass
 class ListComp(Expression):
     elt: Expression
-    generators: List[Comprehension]
+    generators: ListT[Comprehension]
     lineno: int
     col_offset: int
     end_lineno: Optional[int]
@@ -528,7 +532,7 @@ class ListComp(Expression):
 @dataclass
 class SetComp(Expression):
     elt: Expression
-    generators: List[Comprehension]
+    generators: ListT[Comprehension]
     lineno: int
     col_offset: int
     end_lineno: Optional[int]
@@ -540,7 +544,7 @@ class SetComp(Expression):
 class DictComp(Expression):
     key: Expression
     value: Expression
-    generators: List[Comprehension]
+    generators: ListT[Comprehension]
     lineno: int
     col_offset: int
     end_lineno: Optional[int]
@@ -551,7 +555,7 @@ class DictComp(Expression):
 @dataclass
 class GeneratorExp(Expression):
     elt: Expression
-    generators: List[Comprehension]
+    generators: ListT[Comprehension]
     lineno: int
     col_offset: int
     end_lineno: Optional[int]
@@ -593,7 +597,7 @@ class YieldFrom(Expression):
 class Compare(Expression):
     left: Expression
     ops: 'Compare'
-    comparators: List[Expression]
+    comparators: ListT[Expression]
     lineno: int
     col_offset: int
     end_lineno: Optional[int]
@@ -604,8 +608,8 @@ class Compare(Expression):
 @dataclass
 class Call(Expression):
     func: Expression
-    args: List[Expression]
-    keywords: List[Keyword]
+    args: ListT[Expression]
+    keywords: ListT[Keyword]
     lineno: int
     col_offset: int
     end_lineno: Optional[int]
@@ -627,7 +631,7 @@ class FormattedValue(Expression):
 #  expr Constructor(JoinedStr, [Field(expr, values, seq=True)])
 @dataclass
 class JoinedStr(Expression):
-    values: List[Expression]
+    values: ListT[Expression]
     lineno: int
     col_offset: int
     end_lineno: Optional[int]
@@ -637,12 +641,19 @@ class JoinedStr(Expression):
 #  expr Constructor(Constant, [Field(constant, value), Field(string, kind, opt=True)])
 @dataclass
 class Constant(Expression):
-    value = None
-    kind: Optional[str]
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+    value: Any
+    kind: Optional[str] = None
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
+
+
+# For python <=3.7
+#  expr Constructor(Constant, [Field(constant, value), Field(string, kind, opt=True)])
+@dataclass
+class Str(Expression):
+    s: str
 
 
 #  expr Constructor(Attribute, [Field(expr, value), Field(identifier, attr), Field(expr_context, ctx)])
@@ -684,33 +695,33 @@ class Starred(Expression):
 @dataclass
 class Name(Expression):
     id: Identifier
-    ctx: ExpressionContext
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+    ctx: ExpressionContext = None
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
 
 
 #  expr Constructor(List, [Field(expr, elts, seq=True), Field(expr_context, ctx)])
 @dataclass
-class ListN(Expression):
-    elts: List[Expression]
-    ctx: ExpressionContext
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+class List(Expression):
+    elts: ListT[Expression] = field(default_factory=list)
+    ctx: ExpressionContext = None
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
 
 
 #  expr Constructor(Tuple, [Field(expr, elts, seq=True), Field(expr_context, ctx)])
 @dataclass
-class TupleN(Expression):
-    elts: List[Expression]
-    ctx: ExpressionContext
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+class Tuple(Expression):
+    elts: ListT[Expression] = field(default_factory=list)
+    ctx: ExpressionContext = None
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
 
 
 #  expr_context Constructor(Load, [])
@@ -760,7 +771,7 @@ class Slice(Slice):
 #  slice Constructor(ExtSlice, [Field(slice, dims, seq=True)])
 @dataclass
 class ExtSlice(Slice):
-    dims: List[Slice]
+    dims: ListT[Slice]
 
 
 #  slice Constructor(Index, [Field(expr, value)])

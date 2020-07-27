@@ -52,6 +52,10 @@ def is_valid(name):
     return not all(c in name for c in (':', '(', '.', ' '))
 
 
+class CodeGenerator:
+    pass
+
+
 class APIGenerator:
     def __init__(self):
         self.type_registry = dict()
@@ -255,7 +259,7 @@ class APIGenerator:
 
                 t2type = self.generate_type(t2)
                 self.type_registry[t2type] = t1.spelling
-                print(f'{t1.spelling} = {t2type}')
+                print(f'# typedef\n{t1.spelling} = {t2type}')
 
             elif elem.kind == CursorKind.ENUM_DECL:
                 enum = self.generate_enum(elem)
@@ -268,7 +272,7 @@ class APIGenerator:
                 show_elem(elem)
 
 
-if __name__  == '__main__':
+if __name__ == '__main__':
     index = clang.cindex.Index.create()
     tu = index.parse('/usr/include/SDL2/SDL.h')
 
