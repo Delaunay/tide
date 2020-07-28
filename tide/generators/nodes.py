@@ -456,10 +456,10 @@ class BinOp(Expression):
     left: Expression
     op: 'BinOp'
     right: Expression
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
 
 
 #  expr Constructor(UnaryOp, [Field(unaryop, op), Field(expr, operand)])
@@ -714,6 +714,9 @@ class Name(Expression):
 
     def __repr__(self):
         return f'Name(id={self.id})'
+
+    def __hash__(self):
+        return hash(self.id)
 
 
 #  expr Constructor(List, [Field(expr, elts, seq=True), Field(expr_context, ctx)])

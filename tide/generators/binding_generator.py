@@ -5,6 +5,7 @@ from tide.generators.api_generators import show_elem, get_comment
 import tide.generators.nodes as T
 import ctypes
 
+import ast
 from ast import ClassDef
 from copy import deepcopy
 from ast import Module
@@ -20,16 +21,25 @@ from ast import Module
 #     uint64_t=ctypes.c_uint64
 # )
 
-type_mapping = dict(
-    int8_t='c_int8',
-    uint8_t='c_uint8',
-    int16_t='c_int16',
-    uint16_t='c_uint16',
-    int32_t='c_int32',
-    uint32_t='c_uint32',
-    int64_t='c_int64',
-    uint64_t='c_uint64'
-)
+type_mapping = {
+    'int': T.Name('c_int'),
+    'unsigned int': T.Name('c_uint'),
+    'long': T.Name('c_long'),
+    'unsigned long': T.Name('c_ulong'),
+    'unsigned char': T.Name('c_ubyte'),
+    'unsigned short': T.Name('c_ushort'),
+    'short': T.Name('c_short'),
+    'float': T.Name('c_float'),
+    'double': T.Name('c_double'),
+    'int8_t': T.Name('c_int8'),
+    'uint8_t': T.Name('c_uint8'),
+    'int16_t': T.Name('c_int16'),
+    'uint16_t': T.Name('c_uint16'),
+    'int32_t': T.Name('c_int32'),
+    'uint32_t': T.Name('c_uint32'),
+    'int64_t': T.Name('c_int64'),
+    'uint64_t': T.Name('c_uint64')
+}
 
 
 def is_valid(name):
@@ -42,17 +52,18 @@ class APIGenerator:
     def __init__(self):
         self.type_registry = deepcopy(type_mapping)
 
-    def generate_type(self, type):
+    def generate_type(self, type, depth=0):
         # This is meant to remember typedefs and use the typedef instead of the underlying type
         # In particular when `typedef struct` is used
         if type.spelling in self.type_registry:
             return self.type_registry[type.spelling]
 
-        val = self._generate_type(type)
+        val = self._generate_type(type, depth)
         self.type_registry[type.spelling] = val
         return val
 
     def _generate_type(self, type: Type, depth=0):
+        # print(type.kind, type.spelling, self.type_registry.get(type.spelling, 'NOT FOUND'))
         if type.kind == TypeKind.VOID:
             return T.Name('None')
 
@@ -65,15 +76,12 @@ class APIGenerator:
             if pointee.kind is TypeKind.TYPEDEF:
                 pointee = pointee.get_canonical()
 
-            # in python every object is a pointer
-            #  if pointee.kind in (TypeKind.RECORD, TypeKind.FUNCTIONPROTO, TypeKind.UNEXPOSED):
-            #   return self._generate_type(pointee, depth + 1)
-
-            #if not pointee.is_pod():
-            #    show_elem(pointee)
+            if pointee.kind != TypeKind.VOID:
+                pointee_type = self.generate_type(pointee, depth + 1)
+            else:
+                pointee_type = T.Name('c_void_p')
 
             # Function pointer do not need to be decorated by POINTER call
-            pointee_type = self._generate_type(pointee, depth + 1)
             if isinstance(pointee_type, T.Call) and isinstance(pointee_type.func, T.Name) and pointee_type.func.id == 'CFUNCTYPE':
                 return pointee_type
 
@@ -92,22 +100,32 @@ class APIGenerator:
 
         if type.kind == TypeKind.FUNCTIONPROTO or (type.kind == TypeKind.UNEXPOSED and type.get_canonical().kind == TypeKind.FUNCTIONPROTO):
             # SDL_HitTest = CFUNCTYPE(SDL_HitTestResult, POINTER(SDL_Window), POINTER(SDL_Point), c_void_p)
-            canon = type.get_canonical()
+            canon = type
+            if type.kind == TypeKind.UNEXPOSED:
+                canon = type.get_canonical()
+
             rtype = canon.get_result()
 
             args = []
             for arg in canon.argument_types():
-                args.append(self._generate_type(arg, depth + 1))
+                args.append(self.generate_type(arg, depth + 1))
 
-            returntype = self._generate_type(rtype, depth + 1)
+            returntype = self.generate_type(rtype, depth + 1)
 
-            args = [returntype]
-            args.extend(args)
-            return T.Call(T.Name('CFUNCTYPE'), args=args)
+            cargs = [returntype]
+            cargs.extend(args)
+            return T.Call(T.Name('CFUNCTYPE'), args=cargs)
 
-            # return f'Callable[[{args}], {self._generate_type(rtype, depth + 1)}]'
+        if type.kind == TypeKind.CONSTANTARRAY:
+            t = self.generate_type(type.element_type, depth + 1)
+            return T.BinOp(t, ast.Mult(), T.Constant(type.element_count))
 
-        # show_elem(type)
+        # struct <TYPENAME>
+        if type.kind == TypeKind.ELABORATED:
+            return T.Name(type.spelling.replace('struct', '').strip())
+
+
+        show_elem(type)
         return T.Name(type.spelling)
 
     def generate_function(self, elem: Cursor):
@@ -164,6 +182,40 @@ class APIGenerator:
 
         return anonymous_renamed
 
+    def generate_field(self, body, attrs, attr, anonymous_renamed, depth):
+        if attr.kind == CursorKind.FIELD_DECL:
+            # Rename anonymous types
+            uid = attr.type.get_declaration().get_usr()
+
+            if uid in anonymous_renamed:
+                typename = T.Name(anonymous_renamed[uid])
+            else:
+                typename = self.generate_type(attr.type)
+
+            pair = T.Tuple()
+            pair.elts = [
+                T.Str(attr.spelling),
+                typename
+            ]
+            attrs.elts.append(pair)
+
+        elif attr.kind in (CursorKind.UNION_DECL, CursorKind.STRUCT_DECL):
+            nested_struct = self.generate_struct_union(
+                attr,
+                depth + 1,
+                nested=True,
+                rename=anonymous_renamed)
+
+            body.append(nested_struct)
+        elif attr.kind == CursorKind.PACKED_ATTR:
+            for attr2 in attr.get_children():
+                self.generate_field(body, attrs, attr2, anonymous_renamed, depth + 1)
+                # attrs.append(field)
+        else:
+            show_elem(attr)
+            print('NESTED ', attr.kind)
+            raise RuntimeError('')
+
     def generate_struct_union(self, elem: Cursor, depth=1, nested=False, rename=None):
         pyname = self.get_name(elem, rename=rename)
 
@@ -180,32 +232,7 @@ class APIGenerator:
 
         attr: Cursor
         for attr in elem.get_children():
-            if attr.kind == CursorKind.FIELD_DECL:
-                # Rename anonymous types
-                uid = attr.type.get_declaration().get_usr()
-
-                if uid in anonymous_renamed:
-                    typename = T.Name(anonymous_renamed[uid])
-                else:
-                    typename = self.generate_type(attr.type)
-
-                pair = T.Tuple()
-                pair.elts = [
-                    T.Str(attr.spelling),
-                    typename
-                ]
-                attrs.elts.append(pair)
-
-            elif attr.kind in (CursorKind.UNION_DECL, CursorKind.STRUCT_DECL):
-                nested_struct = self.generate_struct_union(
-                    attr,
-                    depth + 1,
-                    nested=True,
-                    rename=anonymous_renamed)
-
-                body.append(nested_struct)
-            else:
-                print('NESTED ', attr.kind)
+            self.generate_field(body, attrs, attr, anonymous_renamed, depth)
 
         # fields are at the end because we might use types defined above
         body.append(T.Assign([T.Name('_fields_')], attrs))
@@ -242,11 +269,12 @@ class APIGenerator:
 
             # SDL_version = struct SDL_version
             if t1.spelling == t2.spelling.split(' ')[-1]:
-                self.type_registry[t2.spelling] = t1.spelling
+                self.type_registry[t2.spelling] = T.Name(t1.spelling)
                 return None
 
+            # print('T2')
             t2type = self.generate_type(t2)
-            # self.type_registry[t2type] = t1.spelling
+            # self.type_registry[t2type] = T.Name(t1.spelling)
 
             if isinstance(t2type, str):
                 return T.Assign([T.Name(t1.spelling)], T.Name(t2type))
@@ -274,7 +302,6 @@ class APIGenerator:
                 continue
 
             expr = self.dispatch(elem)
-            print(expr)
 
             if expr is not None and not isinstance(expr, str):
                 module.body.append(T.Expr(expr))
