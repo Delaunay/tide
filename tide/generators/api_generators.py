@@ -42,7 +42,7 @@ def reformat_comment(comment):
 def get_comment(elem, indent='    '):
     comment = ''
     if elem.raw_comment:
-        comment = f'{indent}"""{reformat_comment(elem.raw_comment)}"""\n'
+        comment = reformat_comment(elem.raw_comment)
     return comment
 
 

@@ -395,10 +395,10 @@ class Nonlocal(Statement):
 @dataclass
 class Expr(Statement):
     value: Expression
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
 
 
 #  stmt Constructor(Pass, [])
@@ -608,12 +608,20 @@ class Compare(Expression):
 @dataclass
 class Call(Expression):
     func: Expression
-    args: ListT[Expression]
-    keywords: ListT[Keyword]
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+    args: ListT[Expression] = field(default_factory=list)
+    keywords: ListT[Keyword] = field(default_factory=list)
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
+
+    def __repr__(self):
+        return f'Call(fun={self.func}. args={self.args})'
+
+    # This need to be hashable because when translating C to python
+    # C callback types are created using the CFUNCTYPE function call
+    def __hash__(self):
+        return hash(self.__repr__())
 
 
 #  expr Constructor(FormattedValue, [Field(expr, value), Field(int, conversion, opt=True), Field(expr, format_spec, opt=True)])
@@ -654,6 +662,9 @@ class Constant(Expression):
 @dataclass
 class Str(Expression):
     s: str
+
+    def __repr__(self):
+        return f"'{self.s}'"
 
 
 #  expr Constructor(Attribute, [Field(expr, value), Field(identifier, attr), Field(expr_context, ctx)])
@@ -700,6 +711,9 @@ class Name(Expression):
     col_offset: int = None
     end_lineno: Optional[int] = None
     end_col_offset: Optional[int] = None
+
+    def __repr__(self):
+        return f'Name(id={self.id})'
 
 
 #  expr Constructor(List, [Field(expr, elts, seq=True), Field(expr_context, ctx)])
