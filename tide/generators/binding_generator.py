@@ -9,6 +9,8 @@ import ast
 from ast import ClassDef
 from copy import deepcopy
 from ast import Module
+import logging
+from astunparse import unparse, dump
 
 # type_mapping = dict(
 #     int8_t=ctypes.c_int8,
@@ -20,6 +22,9 @@ from ast import Module
 #     int64_t=ctypes.c_uint64,
 #     uint64_t=ctypes.c_uint64
 # )
+
+log = logging.getLogger('TIDE')
+
 
 type_mapping = {
     'int': T.Name('c_int'),
@@ -38,8 +43,14 @@ type_mapping = {
     'int32_t': T.Name('c_int32'),
     'uint32_t': T.Name('c_uint32'),
     'int64_t': T.Name('c_int64'),
-    'uint64_t': T.Name('c_uint64')
+    'uint64_t': T.Name('c_uint64'),
+    'void *': T.Name('c_void_p'),
+    'FILE *': T.Name('c_void_p'),
 }
+
+# ignore const
+# for k, v in list(type_mapping.items()):
+#     type_mapping[f'const {k}'] = v
 
 
 def is_valid(name):
@@ -48,18 +59,45 @@ def is_valid(name):
     return not all(c in name for c in (':', '(', '.', ' '))
 
 
+def d(depth=0):
+    s = '|:' * depth
+    return s + '-> '
+
+
+def get_typename(type: Type) -> T.Name:
+    if not type.is_const_qualified():
+        return T.Name(type.spelling)
+
+    typename = type.spelling.replace('const ', '')
+    return T.Name(typename)
+
+
+class Unsupported(Exception):
+    pass
+
+
 class APIGenerator:
     def __init__(self):
         self.type_registry = deepcopy(type_mapping)
 
     def generate_type(self, type, depth=0):
+        if type.spelling == 'va_list':
+            raise Unsupported()
+
+        lookup_name = type.spelling
+        if type.is_const_qualified():
+            lookup_name = lookup_name.replace('const', '').strip()
+
         # This is meant to remember typedefs and use the typedef instead of the underlying type
         # In particular when `typedef struct` is used
-        if type.spelling in self.type_registry:
-            return self.type_registry[type.spelling]
+        cached_type = self.type_registry.get(lookup_name)
+        if cached_type is not None:
+            log.debug(f'{d(depth)}Found cached type `{cached_type}`')
+            return cached_type
 
         val = self._generate_type(type, depth)
         self.type_registry[type.spelling] = val
+        log.debug(f'{d(depth)}Resolved type `{type.spelling}` to `{val}`')
         return val
 
     def _generate_type(self, type: Type, depth=0):
@@ -73,30 +111,30 @@ class APIGenerator:
         if type.kind == TypeKind.POINTER:
             pointee: Type = type.get_pointee()
 
+            # Typedef use the name that it is aliased to
             if pointee.kind is TypeKind.TYPEDEF:
-                pointee = pointee.get_canonical()
+                pointee = get_typename(pointee)
 
-            if pointee.kind != TypeKind.VOID:
-                pointee_type = self.generate_type(pointee, depth + 1)
+            elif pointee.kind != TypeKind.VOID:
+                pointee = self.generate_type(pointee, depth + 1)
             else:
-                pointee_type = T.Name('c_void_p')
+                pointee = T.Name('c_void_p')
 
             # Function pointer do not need to be decorated by POINTER call
-            if isinstance(pointee_type, T.Call) and isinstance(pointee_type.func, T.Name) and pointee_type.func.id == 'CFUNCTYPE':
-                return pointee_type
+            if isinstance(pointee, T.Call) and isinstance(pointee.func, T.Name) and pointee.func.id == 'CFUNCTYPE':
+                return pointee
 
             # for native types we need to keep ref because python will copy them
-            return T.Call(T.Name('POINTER'), [pointee_type])
+            return T.Call(T.Name('POINTER'), [pointee])
 
         if type.kind == TypeKind.CHAR_S:
             return T.Name('c_char_p')
 
-        if type.is_const_qualified():
-            typename = type.spelling.replace('const ', '')
-            return T.Name(f'Const[{typename}]')
+        # if type.is_const_qualified():
+        #     return T.Name(get_typename(type))
 
         if type.kind == TypeKind.TYPEDEF:
-            return T.Name(type.spelling)
+            return get_typename(type)
 
         if type.kind == TypeKind.FUNCTIONPROTO or (type.kind == TypeKind.UNEXPOSED and type.get_canonical().kind == TypeKind.FUNCTIONPROTO):
             # SDL_HitTest = CFUNCTYPE(SDL_HitTestResult, POINTER(SDL_Window), POINTER(SDL_Point), c_void_p)
@@ -120,32 +158,47 @@ class APIGenerator:
             t = self.generate_type(type.element_type, depth + 1)
             return T.BinOp(t, ast.Mult(), T.Constant(type.element_count))
 
+        # Represents a C array with an unspecified size.
+        if type.kind == TypeKind.INCOMPLETEARRAY:
+            element_type = self.generate_type(type.element_type, depth + 1)
+            # char *[] -> char **
+            return T.Call(T.Name('POINTER'), [element_type])
+
         # struct <TYPENAME>
         if type.kind == TypeKind.ELABORATED:
-            return T.Name(type.spelling.replace('struct', '').strip())
+            return T.Name(get_typename(type).id.replace('struct', '').strip())
 
+        if type.kind == TypeKind.ENUM:
+            return get_typename(type)
 
         show_elem(type)
-        return T.Name(type.spelling)
+        return get_typename(type)
 
-    def generate_function(self, elem: Cursor):
+    def generate_function(self, elem: Cursor, depth=0):
+        log.debug(f'{d(depth)}Generate function `{elem.spelling}`')
         definition: Cursor = elem.get_definition()
 
         if definition is None:
             definition = elem
 
-        rtype = self.generate_type(definition.result_type)
+        rtype = self.generate_type(definition.result_type, depth + 1)
         args = definition.get_arguments()
 
         pyargs = []
         for a in args:
-            atype = self.generate_type(a.type)
+            atype = self.generate_type(a.type, depth + 1)
             pyargs.append(atype)
 
         funnane = definition.spelling
-        return T.Call(T.Name('_bind'), [T.Str(funnane), T.List(elts=pyargs), rtype])
+        if not pyargs:
+            pyargs = T.Name('None')
+        else:
+            pyargs = T.List(elts=pyargs)
 
-    def get_name(self, elem, rename=None):
+        return T.Call(T.Name('_bind'), [T.Str(funnane), pyargs, rtype])
+
+    def get_name(self, elem, rename=None, depth=0):
+        log.debug(f'{d(depth)}Fetch name')
         pyname = elem.spelling
 
         if hasattr(elem, 'displayname') and elem.displayname:
@@ -190,7 +243,7 @@ class APIGenerator:
             if uid in anonymous_renamed:
                 typename = T.Name(anonymous_renamed[uid])
             else:
-                typename = self.generate_type(attr.type)
+                typename = self.generate_type(attr.type, depth + 1)
 
             pair = T.Tuple()
             pair.elts = [
@@ -217,12 +270,17 @@ class APIGenerator:
             raise RuntimeError('')
 
     def generate_struct_union(self, elem: Cursor, depth=1, nested=False, rename=None):
-        pyname = self.get_name(elem, rename=rename)
+        log.debug(f'{d(depth)}Generate struct `{elem.spelling}`')
+        pyname = self.get_name(elem, rename=rename, depth=depth + 1)
 
         base = 'Structure'
         if elem.kind == CursorKind.UNION_DECL:
             base = 'Union'
 
+        # For recursive data structure
+        #  log.debug(pyname)
+        self.type_registry[f'struct {pyname}'] = T.Name(pyname)
+        self.type_registry[f'const struct {pyname}'] = T.Name(pyname)
         anonymous_renamed = self.find_anonymous_fields(elem)
 
         # Docstring is the first element of the body
@@ -235,26 +293,34 @@ class APIGenerator:
             self.generate_field(body, attrs, attr, anonymous_renamed, depth)
 
         # fields are at the end because we might use types defined above
-        body.append(T.Assign([T.Name('_fields_')], attrs))
-        return T.ClassDef(
-            name=pyname,
-            bases=[T.Name(base)],
-            body=body,
-        )
+        if not body:
+            body.append(ast.Pass())
 
-    def generate_enum(self, elem: Cursor):
+        if not attrs.elts:
+            return T.ClassDef(name=pyname, bases=[T.Name(base)], body=body)
+
+        fields = T.Assign([T.Attribute(T.Name(pyname), '_fields_')], attrs)
+        return [T.ClassDef(name=pyname, bases=[T.Name(base)], body=body), fields]
+
+    def generate_enum(self, elem: Cursor, depth=0):
+        log.debug(f'{d(depth)}Generate Enum')
         name = self.get_name(elem)
 
-        values = []
+        enum = []
+
+        if name:
+            enum.append(T.Assign([T.Name(name)], self.type_registry.get('int')))
+
         for value in elem.get_children():
             if value.kind == CursorKind.ENUM_CONSTANT_DECL:
-                values.append(f'{self.get_name(value)} = {value.enum_value}')
+                enum.append(T.Assign(
+                    [T.Name(self.get_name(value))],
+                    T.Constant(value.enum_value)))
             else:
-                print('ERROR')
-                show_elem(value)
+                log.error(f'Unexpected children {value.kind}')
+                raise RuntimeError()
 
-        values = '\n'.join(values)
-        return f"\nclass {name}(enum):\n    pass\n\n{values}\n"
+        return enum
 
     def dispatch(self, elem):
         if elem.kind == CursorKind.FUNCTION_DECL:
@@ -267,22 +333,22 @@ class APIGenerator:
             t1 = elem.type
             t2 = elem.underlying_typedef_type
 
+            log.debug(f'Typedef {t1.spelling} = {t2.spelling}')
             # SDL_version = struct SDL_version
             if t1.spelling == t2.spelling.split(' ')[-1]:
-                self.type_registry[t2.spelling] = T.Name(t1.spelling)
+                if t2.spelling not in self.type_registry:
+                    self.type_registry[t2.spelling] = T.Name(t1.spelling, ctx=ast.Load())
                 return None
 
-            # print('T2')
-            t2type = self.generate_type(t2)
-            # self.type_registry[t2type] = T.Name(t1.spelling)
+            t2type: T.Name = self.generate_type(t2)
+            if t2.spelling not in self.type_registry:
+                self.type_registry[t2.spelling] = T.Name(t1.spelling, ctx=ast.Load())
 
-            if isinstance(t2type, str):
-                return T.Assign([T.Name(t1.spelling)], T.Name(t2type))
-
-            return T.Assign([T.Name(t1.spelling)], t2type)
+            expr = ast.Assign([T.Name(t1.spelling, ctx=ast.Store())], t2type)
+            return expr
 
         elif elem.kind == CursorKind.ENUM_DECL:
-            enum = self.generate_enum(elem)
+            return self.generate_enum(elem)
 
         # Global variables
         elif elem.kind == CursorKind.VAR_DECL:
@@ -301,24 +367,50 @@ class APIGenerator:
             if not str(loc.file.name).startswith('/usr/include/SDL2'):
                 continue
 
-            expr = self.dispatch(elem)
+            try:
+                expr = self.dispatch(elem)
 
-            if expr is not None and not isinstance(expr, str):
-                module.body.append(T.Expr(expr))
+                if expr is not None and not isinstance(expr, str):
+
+                    if isinstance(expr, list):
+                        for e in expr:
+                            module.body.append(T.Expr(e))
+                    else:
+                        module.body.append(T.Expr(expr))
+
+            except Unsupported:
+                pass
 
         return module
 
 
 if __name__ == '__main__':
+    import sys
+    logging.basicConfig(stream=sys.stdout)
+    log.setLevel(logging.DEBUG)
+
     index = clang.cindex.Index.create()
-    tu = index.parse('/usr/include/SDL2/SDL.h')
+    file = '/usr/include/SDL2/SDL.h'
+    # file = '/home/setepenre/work/tide/tests/binding/typedef_func.h'
+    tu = index.parse(file)
+
+    for diag in tu.diagnostics:
+        print(diag.format())
 
     gen = APIGenerator()
     module = gen.generate(tu)
 
     print('=' * 80)
-    from astunparse import unparse, dump
-    print(unparse(module))
+
+
+    import os
+    dirname = os.path.dirname(__file__)
+    with open(os.path.join(dirname, '..', '..', 'output', 'sdl2.py'), 'w') as f:
+        f.write("""from ctypes import *\n_bind = lambda *args: None""")
+        f.write(unparse(module))
+
+    import pprint
+    # pprint.pprint(gen.type_registry)
 
     # import ast
     # ast.dump(module)
@@ -343,10 +435,9 @@ class check:
     \"\"\"ABC\"\"\"
     pass
 
-def test():
-    \"\"\"ABC\"\"\"
-    pass
+a = check
     """)
 
     print(dump(mod))
+    print(unparse(mod))
 

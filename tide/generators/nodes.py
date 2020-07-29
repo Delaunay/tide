@@ -461,6 +461,9 @@ class BinOp(Expression):
     end_lineno: Optional[int] = None
     end_col_offset: Optional[int] = None
 
+    def __hash__(self):
+        return hash(''.join(str(hash(v)) for v in [self.left, self.op, self.right]))
+
 
 #  expr Constructor(UnaryOp, [Field(unaryop, op), Field(expr, operand)])
 @dataclass
@@ -656,6 +659,9 @@ class Constant(Expression):
     end_lineno: Optional[int] = None
     end_col_offset: Optional[int] = None
 
+    def __hash__(self):
+        return hash(self.value)
+
 
 # For python <=3.7
 #  expr Constructor(Constant, [Field(constant, value), Field(string, kind, opt=True)])
@@ -672,11 +678,11 @@ class Str(Expression):
 class Attribute(Expression):
     value: Expression
     attr: Identifier
-    ctx: ExpressionContext
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+    ctx: ExpressionContext = None
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
 
 
 #  expr Constructor(Subscript, [Field(expr, value), Field(slice, slice), Field(expr_context, ctx)])
