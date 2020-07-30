@@ -1,6 +1,33 @@
 import clang.cindex
 from clang.cindex import Cursor, CursorKind, Type, SourceLocation, TypeKind
 
+import tide.generators.nodes as T
+from astunparse import unparse
+
+
+def type_mapping():
+    return {
+        'int': T.Name('c_int'),
+        'unsigned int': T.Name('c_uint'),
+        'long': T.Name('c_long'),
+        'unsigned long': T.Name('c_ulong'),
+        'unsigned char': T.Name('c_ubyte'),
+        'unsigned short': T.Name('c_ushort'),
+        'short': T.Name('c_short'),
+        'float': T.Name('c_float'),
+        'double': T.Name('c_double'),
+        'int8_t': T.Name('c_int8'),
+        'uint8_t': T.Name('c_uint8'),
+        'int16_t': T.Name('c_int16'),
+        'uint16_t': T.Name('c_uint16'),
+        'int32_t': T.Name('c_int32'),
+        'uint32_t': T.Name('c_uint32'),
+        'int64_t': T.Name('c_int64'),
+        'uint64_t': T.Name('c_uint64'),
+        'void *': T.Name('c_void_p'),
+        'FILE *': T.Name('c_void_p'),
+    }
+
 
 def show_elem(elem: Cursor):
     print(elem.kind)
@@ -56,9 +83,54 @@ class CodeGenerator:
     pass
 
 
+def parse_sdl_name(name):
+    """Parse SDL naming convention and explode it by components
+
+    Examples
+    --------
+    >>> parse_sdl_name('SDL_GetIndex')
+    ('SDL', ['get', 'index'])
+    """
+    # <module>_CamelCase
+    module, name = name.split('_', maxsplit=1)
+
+    names = []
+    buffer = ''
+    c: str
+
+    for c in name:
+        if c == '_':
+            continue
+
+        if c.isupper():
+            if buffer:
+                if buffer + c == 'GL':
+                    buffer = ''
+                    names.append('GL')
+                    continue
+
+                names.append(buffer.lower())
+                buffer = ''
+
+            buffer += c
+        else:
+            buffer += c
+    else:
+        if buffer:
+            names.append(buffer.lower())
+
+    return module, names
+
+
 class APIGenerator:
     def __init__(self):
         self.type_registry = dict()
+        self.new_names = dict()
+        self.modules = dict()
+        self.module = None
+        self.parse_name = parse_sdl_name
+        self.topyfunname = lambda names: '_'.join(names)
+        self.topyclassname = lambda names: ''.join([n.capitalize() for n in names])
 
     def generate_type(self, type):
         # This is meant to remember typedefs and use the typedef instead of the underlying type
@@ -123,21 +195,67 @@ class APIGenerator:
         if definition is None:
             definition = elem
 
-        pyargs = []
-
         rtype = self.generate_type(definition.result_type)
         args = definition.get_arguments()
 
+        pyargs = []
+        cargs = []
         for a in args:
             atype = self.generate_type(a.type)
             aname = a.displayname
-            pyargs.append(f'{aname}: {atype}')
+            pyargs.append(T.Arg(arg=aname, annotation=T.Name(atype)))
+            cargs.append(T.Name(aname))
 
-        funnane = definition.spelling
-        pyargs = ', '.join(pyargs)
+        c_function = definition.spelling
+        module, names = self.parse_name(c_function)
 
-        comment = get_comment(elem)
-        return f'\ndef {funnane}({pyargs}) -> {rtype}:\n{comment}    pass\n'
+        fundef = T.FunctionDef(self.topyfunname(names), T.Arguments(args=pyargs))
+        fundef.body = [
+            # T.Expr(T.Str(get_comment(elem))),
+            T.Return(T.Call(T.Name(c_function), cargs))
+        ]
+
+        # This could be a method
+        if len(pyargs) > 0:
+            classdef: T.ClassDef = self.type_registry.get(pyargs[0].annotation)
+
+            if classdef is not None:
+                # Remove annotation for `self`
+                pyargs[0].arg = 'self'
+                pyargs[0].annotation = None
+                # replace the object by self.handle
+                cargs[0] = T.Attribute(T.Name('self'), 'handle')
+
+                # Generate Accessor properties
+                if len(pyargs) == 1 and (names[0] == 'get' or names[1] == 'get'):
+                    # @property
+                    # def x(self):
+                    #     return SDL_GetX(self.handle)
+                    offset = 1
+                    if names[1] == 'set':
+                        offset = 2
+
+                    fundef.name = self.topyfunname(names[offset])
+                    fundef.decorator_list.append(T.Name('property'))
+                    pass
+
+                if len(pyargs) == 2 and (names[0] == 'set' or names[1] == 'set'):
+                    # @x.setter
+                    # def x(self, x):
+                    #     return SDL_SetX(self.handle, x)
+                    offset = 1
+                    if names[1] == 'set':
+                        offset = 2
+
+                    fundef.name = self.topyfunname(names[offset])
+                    fundef.decorator_list.append(T.Attribute(T.Name(fundef.name), 'setter'))
+                    pass
+
+                # Standard method
+                classdef.body.append(fundef)
+                return None
+
+        return fundef
 
     def get_name(self, elem, rename=None):
         pyname = elem.spelling
@@ -177,46 +295,27 @@ class APIGenerator:
         return anonymous_renamed
 
     def generate_struct_union(self, elem: Cursor, depth=1, nested=False, rename=None):
-        pyname = self.get_name(elem, rename=rename)
-
-        base = '    ' * (depth - 1)
-        indent = '    ' * depth
-
         dataclass_type = 'struct'
         if elem.kind == CursorKind.UNION_DECL:
             dataclass_type = 'union'
 
-        anonymous_renamed = self.find_anonymous_fields(elem)
+        # --
+        c_name = self.get_name(elem, rename=rename)
+        module, names = self.parse_name(c_name)
 
-        attrs = []
-        attr: Cursor
-        for attr in elem.get_children():
-            if attr.kind == CursorKind.FIELD_DECL:
-                # Rename anonymous types
-                uid = attr.type.get_declaration().get_usr()
+        pyname = self.topyclassname(names)
+        class_def = T.ClassDef(pyname)
 
-                if uid in anonymous_renamed:
-                    typename = anonymous_renamed[uid]
-                else:
-                    typename = self.generate_type(attr.type)
+        # Insert the def inside the registry so we can insert method to it
+        self.type_registry[c_name] = class_def
 
-                attrs.append(f'{attr.spelling}: {typename}')
+        ctor = T.FunctionDef('__init__', args=T.Arguments(args=[T.Arg('self'), T.Arg('handle', T.Name(c_name))]))
+        ctor.body = [
+            T.Assign([T.Attribute(T.Name('self'), 'handle')], T.Name('handle'))
+        ]
+        class_def.body.append(ctor)
 
-            elif attr.kind in (CursorKind.UNION_DECL, CursorKind.STRUCT_DECL):
-                attrs.append(self.generate_struct_union(
-                    attr,
-                    depth + 1,
-                    nested=True,
-                    rename=anonymous_renamed))
-            else:
-                print('NESTED ', attr.kind)
-
-        attrs = f'\n{indent}'.join(attrs)
-        if not attrs:
-            attrs = 'pass'
-
-        comment = get_comment(elem, indent)
-        return f'\n{base}@{dataclass_type}\n{base}class {pyname}:\n{comment}{indent}{attrs}\n'
+        return class_def
 
     def generate_enum(self, elem: Cursor):
         name = self.get_name(elem)
@@ -237,42 +336,49 @@ class APIGenerator:
         for elem in tu.cursor.get_children():
             loc: SourceLocation = elem.location
 
+            self.module = self.modules.get(loc.file.name, T.Module(body=[]))
+            self.modules[loc.file.name] = self.module
+
             if not str(loc.file.name).startswith('/usr/include/SDL2'):
                 continue
 
             if elem.kind == CursorKind.FUNCTION_DECL:
                 fun = self.generate_function(elem)
-                print(fun)
+                print(unparse(fun))
 
             elif elem.kind in (CursorKind.STRUCT_DECL, CursorKind.UNION_DECL):
                 struct = self.generate_struct_union(elem)
-                print(struct)
+                print(unparse(struct))
 
-            elif elem.kind == CursorKind.TYPEDEF_DECL:
-                t1 = elem.type
-                t2 = elem.underlying_typedef_type
 
-                # SDL_version = struct SDL_version
-                if t1.spelling == t2.spelling.split(' ')[-1]:
-                    self.type_registry[t2.spelling] = t1.spelling
-                    continue
-
-                t2type = self.generate_type(t2)
-                self.type_registry[t2type] = t1.spelling
-                print(f'# typedef\n{t1.spelling} = {t2type}')
-
-            elif elem.kind == CursorKind.ENUM_DECL:
-                enum = self.generate_enum(elem)
-                print(enum)
-
-            # Global variables
-            elif elem.kind == CursorKind.VAR_DECL:
-                print(f'{elem.spelling}: {self.generate_type(elem.type)}')
-            else:
-                show_elem(elem)
+            # elif elem.kind == CursorKind.TYPEDEF_DECL:
+            #     t1 = elem.type
+            #     t2 = elem.underlying_typedef_type
+            #
+            #     # SDL_version = struct SDL_version
+            #     if t1.spelling == t2.spelling.split(' ')[-1]:
+            #         self.type_registry[t2.spelling] = t1.spelling
+            #         continue
+            #
+            #     t2type = self.generate_type(t2)
+            #     self.type_registry[t2type] = t1.spelling
+            #     print(f'# typedef\n{t1.spelling} = {t2type}')
+            #
+            # elif elem.kind == CursorKind.ENUM_DECL:
+            #     enum = self.generate_enum(elem)
+            #     print(enum)
+            #
+            # # Global variables
+            # elif elem.kind == CursorKind.VAR_DECL:
+            #     print(f'{elem.spelling}: {self.generate_type(elem.type)}')
+            # else:
+            #     show_elem(elem)
 
 
 if __name__ == '__main__':
+
+    # print(parse_sdl_name('SDL_GetIndex'))
+    #
     index = clang.cindex.Index.create()
     tu = index.parse('/usr/include/SDL2/SDL.h')
 

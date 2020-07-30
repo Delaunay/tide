@@ -1,56 +1,16 @@
 import clang.cindex
 from clang.cindex import Cursor, CursorKind, Type, SourceLocation, TypeKind
 
-from tide.generators.api_generators import show_elem, get_comment
+from tide.generators.api_generators import show_elem, get_comment, type_mapping
 import tide.generators.nodes as T
 import ctypes
 
-import ast
-from ast import ClassDef
-from copy import deepcopy
 from ast import Module
 import logging
 from astunparse import unparse, dump
 
-# type_mapping = dict(
-#     int8_t=ctypes.c_int8,
-#     uint8_t=ctypes.c_uint8,
-#     int16_t=ctypes.c_uint64,
-#     uint16_t=ctypes.c_uint64,
-#     int32_t=ctypes.c_uint64,
-#     uint32_t=ctypes.c_uint64,
-#     int64_t=ctypes.c_uint64,
-#     uint64_t=ctypes.c_uint64
-# )
 
 log = logging.getLogger('TIDE')
-
-
-type_mapping = {
-    'int': T.Name('c_int'),
-    'unsigned int': T.Name('c_uint'),
-    'long': T.Name('c_long'),
-    'unsigned long': T.Name('c_ulong'),
-    'unsigned char': T.Name('c_ubyte'),
-    'unsigned short': T.Name('c_ushort'),
-    'short': T.Name('c_short'),
-    'float': T.Name('c_float'),
-    'double': T.Name('c_double'),
-    'int8_t': T.Name('c_int8'),
-    'uint8_t': T.Name('c_uint8'),
-    'int16_t': T.Name('c_int16'),
-    'uint16_t': T.Name('c_uint16'),
-    'int32_t': T.Name('c_int32'),
-    'uint32_t': T.Name('c_uint32'),
-    'int64_t': T.Name('c_int64'),
-    'uint64_t': T.Name('c_uint64'),
-    'void *': T.Name('c_void_p'),
-    'FILE *': T.Name('c_void_p'),
-}
-
-# ignore const
-# for k, v in list(type_mapping.items()):
-#     type_mapping[f'const {k}'] = v
 
 
 def is_valid(name):
@@ -78,7 +38,7 @@ class Unsupported(Exception):
 
 class APIGenerator:
     def __init__(self):
-        self.type_registry = deepcopy(type_mapping)
+        self.type_registry = type_mapping()
 
     def generate_type(self, type, depth=0):
         if type.spelling == 'va_list':
@@ -209,39 +169,68 @@ class APIGenerator:
             pyname = elem.type.spelling
 
         if rename is not None and hasattr(elem, 'get_usr') and elem.get_usr() in rename:
-            return rename[elem.get_usr()]
+            parent, name = rename[elem.get_usr()]
+            return name
 
         if not is_valid(pyname):
             pyname = ''
 
         return pyname
 
-    def find_anonymous_fields(self, elem):
+    def find_anonymous_fields(self, elem, parent='', depth=0):
         # Find Anonymous struct or union
         # to rename them so something valid
+        # Those are also nested struct
         anonymous = dict()
         anonymous_renamed = dict()
 
         for attr in elem.get_children():
             if attr.kind == CursorKind.UNION_DECL or attr.kind == CursorKind.STRUCT_DECL:
-                attr_type_name = self.get_name(attr)
-                if not attr_type_name:
-                    anonymous[attr.get_usr()] = attr
+                attr_type_name = self.get_name(attr, depth=depth + 1)
+                log.debug(f'{d(depth)}Found nested decl, {attr.kind} {attr.spelling} {attr_type_name}')
+                anonymous[attr.get_usr()] = attr
 
             if attr.kind == CursorKind.FIELD_DECL:
-                usr = attr.type.get_declaration().get_usr()
+                usr = self.get_underlying_type_uid(attr.type)
+                log.debug(f'{d(depth)} attr, {attr.kind} {attr.spelling} {usr}')
+
                 if usr in anonymous:
-                    anonymous_renamed[usr] = '_' + self.get_name(attr).capitalize()
+                    log.debug(f'{d(depth)}Found attribute using nested decl: {attr.kind} {attr.spelling}')
+
+                    name = '_' + self.get_name(attr, depth=depth + 1).capitalize()
+                    anonymous_renamed[usr] = (parent, name)
 
         return anonymous_renamed
+
+    def get_underlying_type_uid(self, type: Type):
+        if type.kind == TypeKind.POINTER:
+            return self.get_underlying_type_uid(type.get_pointee())
+
+        if type.kind == TypeKind.TYPEDEF:
+            return type.get_declaration().get_usr()
+
+        if type.kind == TypeKind.ELABORATED:
+            show_elem(type)
+            print(type.get_declaration().get_usr())
+            return type.get_declaration().get_usr()
+
+        return type.get_declaration().get_usr()
 
     def generate_field(self, body, attrs, attr, anonymous_renamed, depth):
         if attr.kind == CursorKind.FIELD_DECL:
             # Rename anonymous types
-            uid = attr.type.get_declaration().get_usr()
+            uid = self.get_underlying_type_uid(attr.type)
 
+            log.debug(f'{d(depth)}uid: {uid} {attr.type.spelling} {anonymous_renamed}')
             if uid in anonymous_renamed:
-                typename = T.Name(anonymous_renamed[uid])
+                parent, name = anonymous_renamed[uid]
+                if parent:
+                    typename = T.Attribute(T.Name(parent), name)
+                else:
+                    typename = T.Name(name)
+
+                if attr.type.kind == TypeKind.POINTER:
+                    typename = T.Call(T.Name('POINTER'), [typename])
             else:
                 typename = self.generate_type(attr.type, depth + 1)
 
@@ -281,7 +270,9 @@ class APIGenerator:
         #  log.debug(pyname)
         self.type_registry[f'struct {pyname}'] = T.Name(pyname)
         self.type_registry[f'const struct {pyname}'] = T.Name(pyname)
-        anonymous_renamed = self.find_anonymous_fields(elem)
+
+        parent = pyname
+        anonymous_renamed = self.find_anonymous_fields(elem, parent, depth=depth + 1)
 
         # Docstring is the first element of the body
         # T.Constant(get_comment(elem))
@@ -365,7 +356,7 @@ class APIGenerator:
             loc: SourceLocation = elem.location
 
             if not str(loc.file.name).startswith('/usr/include/SDL2'):
-                continue
+               continue
 
             try:
                 expr = self.dispatch(elem)
@@ -392,6 +383,7 @@ if __name__ == '__main__':
     index = clang.cindex.Index.create()
     file = '/usr/include/SDL2/SDL.h'
     # file = '/home/setepenre/work/tide/tests/binding/typedef_func.h'
+    # file = '/home/setepenre/work/tide/tests/binding/nested_struct.h'
     tu = index.parse(file)
 
     for diag in tu.diagnostics:
@@ -401,7 +393,6 @@ if __name__ == '__main__':
     module = gen.generate(tu)
 
     print('=' * 80)
-
 
     import os
     dirname = os.path.dirname(__file__)

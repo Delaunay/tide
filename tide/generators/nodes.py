@@ -180,15 +180,18 @@ class ClassDef(Statement):
     end_lineno: Optional[int] = None
     end_col_offset: Optional[int] = None
 
+    def __hash__(self):
+        return hash(self.name)
+
 
 #  stmt Constructor(Return, [Field(expr, value, opt=True)])
 @dataclass
 class Return(Statement):
     value: Optional[Expression]
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
 
 
 #  stmt Constructor(Delete, [Field(expr, targets, seq=True)])
