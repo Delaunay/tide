@@ -4,6 +4,10 @@ from clang.cindex import Cursor, CursorKind, Type, SourceLocation, TypeKind
 import tide.generators.nodes as T
 from astunparse import unparse
 
+import logging
+
+log = logging.getLogger('TIDE')
+
 
 def type_mapping():
     return {
@@ -149,6 +153,9 @@ class APIGenerator:
         if type.kind == TypeKind.POINTER and type.get_pointee().kind == TypeKind.VOID:
             return 'any'
 
+        if type.kind == TypeKind.ELABORATED or type.kind == TypeKind.RECORD:
+            return type.spelling.replace('struct', '').strip()
+
         if type.kind == TypeKind.POINTER:
             pointee: Type = type.get_pointee()
             if pointee.kind is TypeKind.TYPEDEF:
@@ -186,7 +193,7 @@ class APIGenerator:
             # show_elem(type.get_canonical())
             return f'Callable[[{args}], {self._generate_type(rtype, depth + 1)}]'
 
-        # show_elem(type)
+        show_elem(type)
         return type.spelling
 
     def generate_function(self, elem: Cursor):
@@ -210,6 +217,7 @@ class APIGenerator:
         module, names = self.parse_name(c_function)
 
         fundef = T.FunctionDef(self.topyfunname(names), T.Arguments(args=pyargs))
+        fundef.returns = T.Name(rtype)
         fundef.body = [
             # T.Expr(T.Str(get_comment(elem))),
             T.Return(T.Call(T.Name(c_function), cargs))
@@ -217,7 +225,11 @@ class APIGenerator:
 
         # This could be a method
         if len(pyargs) > 0:
-            classdef: T.ClassDef = self.type_registry.get(pyargs[0].annotation)
+            # log.debug(f'Looking for {pyargs[0].annotation} in {self.type_registry}')
+
+            selftype = pyargs[0].annotation
+            classdef: T.ClassDef = self.type_registry.get(selftype.id)
+            log.debug(f'found {classdef.name} for {selftype}')
 
             if classdef is not None:
                 # Remove annotation for `self`
@@ -235,11 +247,11 @@ class APIGenerator:
                     if names[1] == 'set':
                         offset = 2
 
-                    fundef.name = self.topyfunname(names[offset])
+                    fundef.name = self.topyfunname(names[offset:])
                     fundef.decorator_list.append(T.Name('property'))
                     pass
 
-                if len(pyargs) == 2 and (names[0] == 'set' or names[1] == 'set'):
+                if False: # len(pyargs) == 2 and (names[0] == 'set' or names[1] == 'set'):
                     # @x.setter
                     # def x(self, x):
                     #     return SDL_SetX(self.handle, x)
@@ -247,11 +259,12 @@ class APIGenerator:
                     if names[1] == 'set':
                         offset = 2
 
-                    fundef.name = self.topyfunname(names[offset])
+                    fundef.name = self.topyfunname(names[offset:])
                     fundef.decorator_list.append(T.Attribute(T.Name(fundef.name), 'setter'))
                     pass
 
                 # Standard method
+                log.debug('Addong method')
                 classdef.body.append(fundef)
                 return None
 
@@ -339,30 +352,36 @@ class APIGenerator:
             self.module = self.modules.get(loc.file.name, T.Module(body=[]))
             self.modules[loc.file.name] = self.module
 
-            if not str(loc.file.name).startswith('/usr/include/SDL2'):
-                continue
-
+            # if not str(loc.file.name).startswith('/usr/include/SDL2'):
+            #    continue
+            expr = None
             if elem.kind == CursorKind.FUNCTION_DECL:
-                fun = self.generate_function(elem)
-                print(unparse(fun))
+                expr = self.generate_function(elem)
 
             elif elem.kind in (CursorKind.STRUCT_DECL, CursorKind.UNION_DECL):
-                struct = self.generate_struct_union(elem)
-                print(unparse(struct))
+                expr = self.generate_struct_union(elem)
 
+            elif elem.kind == CursorKind.TYPEDEF_DECL:
+                t1 = elem.type
+                t2 = elem.underlying_typedef_type
 
-            # elif elem.kind == CursorKind.TYPEDEF_DECL:
-            #     t1 = elem.type
-            #     t2 = elem.underlying_typedef_type
-            #
-            #     # SDL_version = struct SDL_version
-            #     if t1.spelling == t2.spelling.split(' ')[-1]:
-            #         self.type_registry[t2.spelling] = t1.spelling
-            #         continue
-            #
-            #     t2type = self.generate_type(t2)
-            #     self.type_registry[t2type] = t1.spelling
-            #     print(f'# typedef\n{t1.spelling} = {t2type}')
+                classdef = self.type_registry.get(t2.spelling)
+                if classdef is not None:
+                    self.type_registry[t1.spelling] = classdef
+
+            if expr is not None:
+                self.module.body.append(T.Expr(expr))
+
+        return self.modules
+
+                # # SDL_version = struct SDL_version
+                # if t1.spelling == t2.spelling.split(' ')[-1]:
+                #     self.type_registry[t2.spelling] = t1.spelling
+                #     continue
+
+                # t2type = self.generate_type(t2)
+                # self.type_registry[t2type] = t1.spelling
+                # print(f'# typedef\n{t1.spelling} = {t2type}')
             #
             # elif elem.kind == CursorKind.ENUM_DECL:
             #     enum = self.generate_enum(elem)
@@ -376,12 +395,24 @@ class APIGenerator:
 
 
 if __name__ == '__main__':
+    import sys
+    logging.basicConfig(stream=sys.stdout)
+    log.setLevel(logging.DEBUG)
 
     # print(parse_sdl_name('SDL_GetIndex'))
     #
     index = clang.cindex.Index.create()
-    tu = index.parse('/usr/include/SDL2/SDL.h')
+
+    # file = '/usr/include/SDL2/SDL.h'
+    # file = '/home/setepenre/work/tide/tests/binding/typedef_func.h'
+    file = '/home/setepenre/work/tide/tests/binding/method_transformer.h'
+    tu = index.parse(file)
 
     gen = APIGenerator()
-    gen.generate(tu)
+    modules = gen.generate(tu)
+
+    for k, m in modules.items():
+        print(f'# {k}')
+        print(unparse(m))
+
 
