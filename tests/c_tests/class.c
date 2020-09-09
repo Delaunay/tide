@@ -19,6 +19,7 @@ enum __symdiff_RTTI{
 #undef SYM_ENUM
 };
 
+// include the count inside the node itself to simplify allocations
 #define __HEAD__ \
     enum __symdiff_RTTI __type;\
     int count;
@@ -206,6 +207,8 @@ void sym_print(SymExpr expr){
     }
 }
 
+// Reused temporary should be uncopied because they are owned by the current node
+// but current constructor always assume we are making a copy
 SymExpr sym_deriv_Placeholder(const char* name, SymPlaceholder x){
     if (strcmp(x->_name, name) == 0)
         return sym_scalar(1);
@@ -285,15 +288,15 @@ int main(){
 
     sym_free(df);
 
-    // ==10611== 
-    // ==10611== HEAP SUMMARY:
-    // ==10611==     in use at exit: 0 bytes in 0 blocks
-    // ==10611==   total heap usage: 4 allocs, 4 frees, 1,080 bytes allocated
-    // ==10611== 
-    // ==10611== All heap blocks were freed -- no leaks are possible
-    // ==10611== 
-    // ==10611== For counts of detected and suppressed errors, rerun with: -v
-    // ==10611== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)
+    // ==13580== 
+    // ==13580== HEAP SUMMARY:
+    // ==13580==     in use at exit: 0 bytes in 0 blocks
+    // ==13580==   total heap usage: 9 allocs, 9 frees, 1,184 bytes allocated
+    // ==13580== 
+    // ==13580== All heap blocks were freed -- no leaks are possible
+    // ==13580== 
+    // ==13580== For counts of detected and suppressed errors, rerun with: -v
+    // ==13580== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)
 
     return 0;
 }
