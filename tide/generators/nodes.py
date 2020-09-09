@@ -285,12 +285,12 @@ class While(Statement):
 @dataclass
 class If(Statement):
     test: Expression
-    body: ListT[Statement]
-    orelse: ListT[Statement]
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+    body: ListT[Statement] = field(default_factory=list)
+    orelse: ListT[Statement] = field(default_factory=list)
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
 
 
 #  stmt Constructor(With, [Field(withitem, items, seq=True), Field(stmt, body, seq=True), Field(string, type_comment, opt=True)])

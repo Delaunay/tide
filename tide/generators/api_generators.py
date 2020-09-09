@@ -2,12 +2,39 @@ import clang.cindex
 from clang.cindex import Cursor, CursorKind, Type, SourceLocation, TypeKind
 
 import tide.generators.nodes as T
+from tide.utils.trie import Trie
+
 from astunparse import unparse
 
 import logging
 
 log = logging.getLogger('TIDE')
 
+
+acronyms_db = Trie()
+acronyms_db.insert('GL')
+# Run Length Encoding
+acronyms_db.insert('RLE')
+
+POD = {
+    'int'
+    ,'unsigned int'
+    ,'long'
+    ,'unsigned long'
+    ,'unsigned char'
+    ,'unsigned short'
+    ,'short'
+    ,'float'
+    ,'double'
+    ,'int8_t'
+    ,'uint8_t'
+    ,'int16_t'
+    ,'uint16_t'
+    ,'int32_t'
+    ,'uint32_t'
+    ,'int64_t'
+    ,'uint64_t'
+}
 
 def type_mapping():
     return {
@@ -94,36 +121,96 @@ def parse_sdl_name(name):
     --------
     >>> parse_sdl_name('SDL_GetIndex')
     ('SDL', ['get', 'index'])
+
+    >>> parse_sdl_name('SDL_GetIndexRLE')
+    ('SDL', ['get', 'index', 'RLE'])
     """
     # <module>_CamelCase
     module, name = name.split('_', maxsplit=1)
 
+    # global acronyms_db
+    # acronyms = acronyms_db
+
+    all_upper = False
     names = []
     buffer = ''
     c: str
 
-    for c in name:
+    for i, c in enumerate(name):
         if c == '_':
             continue
 
         if c.isupper():
-            if buffer:
-                if buffer + c == 'GL':
-                    buffer = ''
-                    names.append('GL')
-                    continue
-
+            if buffer and not all_upper:
                 names.append(buffer.lower())
                 buffer = ''
+                all_upper = True
 
             buffer += c
         else:
             buffer += c
+            all_upper = False
     else:
         if buffer:
-            names.append(buffer.lower())
+            if not all_upper:
+                buffer = buffer.lower()
+
+            names.append(buffer)
 
     return module, names
+
+
+def is_ref(type):
+    if isinstance(type, str) and type.startswith('Ref['):
+        return True
+
+    if isinstance(type, T.Name):
+        return is_ref(type.id)
+
+    # Handle the AST version
+    return False
+
+
+class Callable:
+    def __init__(self, args, returntype):
+        self.args = args
+        self.returntype = returntype
+
+
+    def __str__(self):
+        args = ', '.join(self.args)
+        return f'Callable[[{args}], {self.returntype}]'
+
+    def __hash__(self):
+        return hash(str(self))
+
+
+class Ref:
+    def __init__(self, base):
+        self.base = base
+    
+    def __str__(self):
+        return f'Ref[{self.base}]'
+
+    def __hash__(self):
+        return hash(str(self))
+
+
+class Const:
+    def __init__(self, base):
+        self.base = base
+    
+    def __str__(self):
+        return f'Const[{self.base}]'
+
+    def __hash__(self):
+        return hash(str(self))
+
+
+def get_base_type(type):
+    if isinstance(type, (Ref, Const)):
+        return type.base
+    return str(type)
 
 
 class APIGenerator:
@@ -146,6 +233,17 @@ class APIGenerator:
         self.type_registry[type.spelling] = val
         return val
 
+    def get_typename(self, type):
+        typedef = self.generate_type(type)
+
+        if isinstance(typedef, (str, Const, Ref, Callable)):
+            return str(typedef)
+
+        if isinstance(typedef, T.ClassDef):
+            return typedef.name
+
+        return typedef 
+
     def _generate_type(self, type: Type, depth=0):
         if type.kind == TypeKind.VOID:
             return 'None'
@@ -158,8 +256,9 @@ class APIGenerator:
 
         if type.kind == TypeKind.POINTER:
             pointee: Type = type.get_pointee()
+
             if pointee.kind is TypeKind.TYPEDEF:
-                pointee = pointee.get_canonical()
+                return Ref(pointee.spelling)
 
             # in python every object is a pointer
             if pointee.kind in (TypeKind.RECORD, TypeKind.FUNCTIONPROTO, TypeKind.UNEXPOSED):
@@ -169,14 +268,14 @@ class APIGenerator:
                 show_elem(pointee)
 
             # for native types we need to keep ref because python will copy them
-            return f'Ref[{self._generate_type(pointee, depth + 1)}]'
+            return Ref(self._generate_type(pointee, depth + 1))
 
         if type.kind == TypeKind.CHAR_S:
             return 'str'
 
         if type.is_const_qualified():
             typename = type.spelling.replace('const ', '')
-            return f'Const[{typename}]'
+            return Const(typename)
 
         if type.kind == TypeKind.TYPEDEF:
             return type.spelling
@@ -189,11 +288,9 @@ class APIGenerator:
             for arg in canon.argument_types():
                 args.append(self._generate_type(arg, depth + 1))
 
-            args = ', '.join(args)
-            # show_elem(type.get_canonical())
-            return f'Callable[[{args}], {self._generate_type(rtype, depth + 1)}]'
+            return Callable(args, self._generate_type(rtype, depth + 1))
 
-        show_elem(type)
+        # show_elem(type)
         return type.spelling
 
     def generate_function(self, elem: Cursor):
@@ -202,13 +299,14 @@ class APIGenerator:
         if definition is None:
             definition = elem
 
-        rtype = self.generate_type(definition.result_type)
+        log.debug(f'Generate function {definition.spelling}')
+        rtype = self.get_typename(definition.result_type)
         args = definition.get_arguments()
 
         pyargs = []
         cargs = []
         for a in args:
-            atype = self.generate_type(a.type)
+            atype = self.get_typename(a.type)
             aname = a.displayname
             pyargs.append(T.Arg(arg=aname, annotation=T.Name(atype)))
             cargs.append(T.Name(aname))
@@ -219,6 +317,7 @@ class APIGenerator:
         fundef = T.FunctionDef(self.topyfunname(names), T.Arguments(args=pyargs))
         fundef.returns = T.Name(rtype)
         fundef.body = [
+            # this is docstring but it is not unparsed correctly
             # T.Expr(T.Str(get_comment(elem))),
             T.Return(T.Call(T.Name(c_function), cargs))
         ]
@@ -228,8 +327,18 @@ class APIGenerator:
             # log.debug(f'Looking for {pyargs[0].annotation} in {self.type_registry}')
 
             selftype = pyargs[0].annotation
-            classdef: T.ClassDef = self.type_registry.get(selftype.id)
-            log.debug(f'found {classdef.name} for {selftype}')
+            classdef = None
+
+            # For class grouping the first arg needs to be a reference to the class type
+            lookuptype = selftype.id
+            if isinstance(lookuptype, Ref):
+                lookuptype = lookuptype.base
+                classdef: T.ClassDef = self.type_registry.get(lookuptype)
+
+                if isinstance(classdef, T.ClassDef):
+                    log.debug(f'found {classdef} for {lookuptype}')
+                else:
+                    classdef = None
 
             if classdef is not None:
                 # Remove annotation for `self`
@@ -239,7 +348,7 @@ class APIGenerator:
                 cargs[0] = T.Attribute(T.Name('self'), 'handle')
 
                 # Generate Accessor properties
-                if len(pyargs) == 1 and (names[0] == 'get' or names[1] == 'get'):
+                if len(pyargs) == 1 and names[0] == 'get':
                     # @property
                     # def x(self):
                     #     return SDL_GetX(self.handle)
@@ -249,9 +358,30 @@ class APIGenerator:
 
                     fundef.name = self.topyfunname(names[offset:])
                     fundef.decorator_list.append(T.Name('property'))
-                    pass
 
-                if False: # len(pyargs) == 2 and (names[0] == 'set' or names[1] == 'set'):
+                if len(pyargs) == 2 and (names[0] == 'get' or names[1] == 'get') and is_ref(pyargs[1].annotation):
+                    rtype = pyargs[1].annotation
+                    cargs[1] = T.Name('result')
+
+                    offset = 1
+                    if names[1] == 'get':
+                        offset = 2
+
+                    fundef.name = self.topyfunname(names[offset:])
+                    fundef.decorator_list.append(T.Name('property'))
+                    fundef.returns = rtype
+
+                    fundef.args.args = [fundef.args.args[0]]
+                    fundef.body = [
+                        # T.Expr(T.Str(get_comment(elem))),
+                        T.Assign([T.Name('result')], T.Call(rtype)),
+                        T.Expr(T.Call(T.Name(c_function), cargs)),
+                        # T.Assign([T.Name('err')], T.Call(T.Name(c_function), cargs)),
+                        # T.If(T.Name('err'), T.Return(T.Name('None'))),
+                        T.Return(T.Name('result'))
+                    ]
+
+                if len(pyargs) == 2 and (names[0] == 'set' or names[1] == 'set'):
                     # @x.setter
                     # def x(self, x):
                     #     return SDL_SetX(self.handle, x)
@@ -261,10 +391,9 @@ class APIGenerator:
 
                     fundef.name = self.topyfunname(names[offset:])
                     fundef.decorator_list.append(T.Attribute(T.Name(fundef.name), 'setter'))
-                    pass
 
                 # Standard method
-                log.debug('Addong method')
+                log.debug(f'Adding method to {classdef.name}')
                 classdef.body.append(fundef)
                 return None
 
@@ -352,8 +481,9 @@ class APIGenerator:
             self.module = self.modules.get(loc.file.name, T.Module(body=[]))
             self.modules[loc.file.name] = self.module
 
-            # if not str(loc.file.name).startswith('/usr/include/SDL2'):
-            #    continue
+            if not str(loc.file.name).startswith('/usr/include/SDL2'):
+                continue
+            
             expr = None
             if elem.kind == CursorKind.FUNCTION_DECL:
                 expr = self.generate_function(elem)
@@ -366,8 +496,12 @@ class APIGenerator:
                 t2 = elem.underlying_typedef_type
 
                 classdef = self.type_registry.get(t2.spelling)
+
                 if classdef is not None:
+                    log.debug(f'{t1.spelling} = {classdef}')
                     self.type_registry[t1.spelling] = classdef
+                else:
+                    log.debug(f'typdef {t1.spelling} = {t2.spelling}')
 
             if expr is not None:
                 self.module.body.append(T.Expr(expr))
@@ -403,9 +537,9 @@ if __name__ == '__main__':
     #
     index = clang.cindex.Index.create()
 
-    # file = '/usr/include/SDL2/SDL.h'
+    file = '/usr/include/SDL2/SDL.h'
     # file = '/home/setepenre/work/tide/tests/binding/typedef_func.h'
-    file = '/home/setepenre/work/tide/tests/binding/method_transformer.h'
+    # file = '/home/setepenre/work/tide/tests/binding/method_transformer.h'
     tu = index.parse(file)
 
     gen = APIGenerator()
@@ -415,4 +549,6 @@ if __name__ == '__main__':
         print(f'# {k}')
         print(unparse(m))
 
+    # for k, v in gen.type_registry.items():
+    #    print(k, '=>', v)
 

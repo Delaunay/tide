@@ -83,3 +83,5 @@ _build/
 *.jpg
 build/
 output/
+
+*.bin
