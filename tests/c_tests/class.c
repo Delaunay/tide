@@ -281,22 +281,34 @@ int main(){
     sym_free(x);
     sym_free(y);
 
-    // df should hold to the reused nodes
+    // df should hold to the reused nodes despite the frees up top
     sym_print(df);
 
-    printf("\n");
-
+    SymExpr ddf = sym_deriv("x", df);
     sym_free(df);
 
-    // ==13580== 
-    // ==13580== HEAP SUMMARY:
-    // ==13580==     in use at exit: 0 bytes in 0 blocks
-    // ==13580==   total heap usage: 9 allocs, 9 frees, 1,184 bytes allocated
-    // ==13580== 
-    // ==13580== All heap blocks were freed -- no leaks are possible
-    // ==13580== 
-    // ==13580== For counts of detected and suppressed errors, rerun with: -v
-    // ==13580== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)
+    printf("\n");
+    sym_print(ddf);
+    sym_free(ddf);
+    printf("\n");
+
+    // ==13850== Memcheck, a memory error detector
+    // ==13850== Copyright (C) 2002-2017, and GNU GPL'd, by Julian Seward et al.
+    // ==13850== Using Valgrind-3.13.0 and LibVEX; rerun with -h for copyright info
+    // ==13850== Command: ./class.c.bin
+    // ==13850==
+    // x * x
+    // 1.000000 * x + 1.000000 * x
+    // 0.000000 * x + 1.000000 * 1.000000 + 0.000000 * x + 1.000000 * 1.000000
+    // ==13850==
+    // ==13850== HEAP SUMMARY:
+    // ==13850==     in use at exit: 0 bytes in 0 blocks
+    // ==13850==   total heap usage: 20 allocs, 20 frees, 1,416 bytes allocated
+    // ==13850==
+    // ==13850== All heap blocks were freed -- no leaks are possible
+    // ==13850==
+    // ==13850== For counts of detected and suppressed errors, rerun with: -v
+    // ==13850== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)
 
     return 0;
 }

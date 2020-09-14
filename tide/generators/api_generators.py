@@ -1,5 +1,5 @@
 import clang.cindex
-from clang.cindex import Cursor, CursorKind, Type, SourceLocation, TypeKind
+from clang.cindex import Cursor, CursorKind, Type, SourceLocation, TypeKind, TranslationUnit
 
 import tide.generators.nodes as T
 from tide.utils.trie import Trie
@@ -35,6 +35,7 @@ POD = {
     ,'int64_t'
     ,'uint64_t'
 }
+
 
 def type_mapping():
     return {
@@ -126,7 +127,10 @@ def parse_sdl_name(name):
     ('SDL', ['get', 'index', 'RLE'])
     """
     # <module>_CamelCase
-    module, name = name.split('_', maxsplit=1)
+    try:
+        module, name = name.split('_', maxsplit=1)
+    except ValueError:
+        return ' ', [name]
 
     # global acronyms_db
     # acronyms = acronyms_db
@@ -294,6 +298,23 @@ class APIGenerator:
         return type.spelling
 
     def generate_function(self, elem: Cursor):
+        """Generate the Python function corresponding to the c function
+
+        Examples
+        --------
+        >>> tu, index = parse_clang('double add(double a, double b);')
+        >>> modules = APIGenerator().generate(tu)
+        >>> for k, m in modules.items():
+        ...     print(f'# {k}')
+        ...     print(unparse(m))
+        # string.c
+        <BLANKLINE>
+        <BLANKLINE>
+        <BLANKLINE>
+        def add(a: double, b: double) -> double:
+            return add(a, b)
+        <BLANKLINE>
+        """
         definition: Cursor = elem.get_definition()
 
         if definition is None:
@@ -481,8 +502,8 @@ class APIGenerator:
             self.module = self.modules.get(loc.file.name, T.Module(body=[]))
             self.modules[loc.file.name] = self.module
 
-            if not str(loc.file.name).startswith('/usr/include/SDL2'):
-                continue
+            #if not str(loc.file.name).startswith('/usr/include/SDL2'):
+            #    continue
             
             expr = None
             if elem.kind == CursorKind.FUNCTION_DECL:
@@ -526,6 +547,27 @@ class APIGenerator:
             #     print(f'{elem.spelling}: {self.generate_type(elem.type)}')
             # else:
             #     show_elem(elem)
+
+
+def parse_clang(code, ext='c', source='string') -> TranslationUnit:
+    """Parse C code using clang, returns a translation unit
+
+    Examples
+    --------
+
+    >>> tu, index = parse_clang('double add(double a, double b){ return a + b; }')
+    >>> for elem in tu.cursor.get_children():
+    ...     print(elem.spelling, elem.kind)
+    add CursorKind.FUNCTION_DECL
+    """
+    fname = f'{source}.{ext}'
+    index = clang.cindex.Index.create()
+    tu = index.parse(path=fname, unsaved_files=[(fname, code)])
+    return tu, index
+
+
+def parse_function(fun):
+    pass
 
 
 if __name__ == '__main__':
