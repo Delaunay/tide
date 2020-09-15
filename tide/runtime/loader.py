@@ -136,7 +136,7 @@ class DLL(object):
         func = getattr(self._dll, funcname, None)
 
         if not func:
-            v = ValueError(f"Could not find function '{funcname}' in {self._libfile})")
+            v = ValueError(f"Could not find function '{funcname}' in {self._libfile}")
             warnings.warn(str(v))
             return lazy_function_error(v)
 

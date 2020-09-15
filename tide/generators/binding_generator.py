@@ -156,7 +156,8 @@ class APIGenerator:
         else:
             pyargs = T.List(elts=pyargs)
 
-        return T.Call(T.Name('_bind'), [T.Str(funnane), pyargs, rtype])
+        binding_call = T.Call(T.Name('_bind'), [T.Str(funnane), pyargs, rtype])
+        return T.Assign([T.Name(funnane)], binding_call)
 
     def get_name(self, elem, rename=None, depth=0):
         log.debug(f'{d(depth)}Fetch name')
