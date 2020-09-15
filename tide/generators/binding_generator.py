@@ -69,6 +69,9 @@ class APIGenerator:
         if type.kind == TypeKind.POINTER and type.get_pointee().kind == TypeKind.VOID:
             return T.Name('c_void_p')
 
+        if type.kind == TypeKind.POINTER and type.get_pointee().kind == TypeKind.CHAR_S:
+            return T.Name('c_char_p')
+
         if type.kind == TypeKind.POINTER:
             pointee: Type = type.get_pointee()
 

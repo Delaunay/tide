@@ -15,11 +15,11 @@ def main():
                               592, 460, SDL_WINDOW_SHOWN)
     windowsurface = SDL_GetWindowSurface(window)
 
-    image = SDL_LoadBMP(b"exampleimage.bmp")
-    SDL_BlitSurface(image, None, windowsurface, None)
+    # image = SDL_LoadBMP(b"exampleimage.bmp")
+    # SDL_BlitSurface(image, None, windowsurface, None)
 
-    SDL_UpdateWindowSurface(window)
-    SDL_FreeSurface(image)
+    # SDL_UpdateWindowSurface(window)
+    # SDL_FreeSurface(image)
 
     running = True
     event = SDL_Event()
@@ -28,6 +28,8 @@ def main():
             if event.type == SDL_QUIT:
                 running = False
                 break
+
+        SDL_UpdateWindowSurface(window)
 
     SDL_DestroyWindow(window)
     SDL_Quit()
