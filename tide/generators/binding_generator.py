@@ -5,6 +5,7 @@ from tide.generators.api_generators import show_elem, get_comment, type_mapping
 import tide.generators.nodes as T
 import ctypes
 
+import ast
 from ast import Module
 import logging
 from astunparse import unparse, dump
@@ -396,8 +397,13 @@ if __name__ == '__main__':
 
     import os
     dirname = os.path.dirname(__file__)
+
     with open(os.path.join(dirname, '..', '..', 'output', 'sdl2.py'), 'w') as f:
-        f.write("""from ctypes import *\n_bind = lambda *args: None""")
+        f.write("""import os\n""")
+        f.write("""from ctypes import *\n""")
+        f.write("""from tide.runtime.loader import DLL\n""")
+        f.write("""_lib = DLL("SDL2", ["SDL2", "SDL2-2.0"], os.getenv("PYSDL2_DLL_PATH"))\n""")
+        f.write("""_bind = _lib.bind_function\n""")
         f.write(unparse(module))
 
     import pprint

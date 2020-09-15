@@ -457,7 +457,41 @@ class APIGenerator:
 
         return anonymous_renamed
 
+    def generate_struct_fields(self, elem):
+        fields = []
+        for e in elem.get_children():
+            if e.kind == CursorKind.FIELD_DECL:
+                field_type = self.get_typename(e.type)
+
+                if isinstance(field_type, str):
+                    field_type = T.Name(field_type)
+
+                fields.append(T.Tuple([T.Str(e.spelling), field_type]))
+
+        return T.Assign([T.Name('_fields_')], T.List(fields))
+
     def generate_struct_union(self, elem: Cursor, depth=1, nested=False, rename=None):
+        """Generate the Python function corresponding to the c function
+
+        Examples
+        --------
+        >>> tu, index = parse_clang('struct Point { int x, y; };')
+        >>> modules = APIGenerator().generate(tu)
+        >>> for k, m in modules.items():
+        ...     print(f'# {k}')
+        ...     print(unparse(m))
+        # string.c
+        <BLANKLINE>
+        <BLANKLINE>
+        <BLANKLINE>
+        class Point(Structure):
+            _fields_ = [('x', int), ('y', int)]
+        <BLANKLINE>
+            def __init__(self, handle: Point):
+                self.handle = handle
+        <BLANKLINE>
+        """
+
         dataclass_type = 'struct'
         if elem.kind == CursorKind.UNION_DECL:
             dataclass_type = 'union'
@@ -469,14 +503,22 @@ class APIGenerator:
         pyname = self.topyclassname(names)
         class_def = T.ClassDef(pyname)
 
+        # if this class is a C struct
+        if True:
+            c_fields = self.generate_struct_fields(elem)
+            class_def.body.append(c_fields)
+            class_def.bases.append(T.Name('Structure'))
+
         # Insert the def inside the registry so we can insert method to it
         self.type_registry[c_name] = class_def
 
-        ctor = T.FunctionDef('__init__', args=T.Arguments(args=[T.Arg('self'), T.Arg('handle', T.Name(c_name))]))
-        ctor.body = [
-            T.Assign([T.Attribute(T.Name('self'), 'handle')], T.Name('handle'))
-        ]
-        class_def.body.append(ctor)
+        # If this class wraps a C struct
+        if False:
+            ctor = T.FunctionDef('__init__', args=T.Arguments(args=[T.Arg('self'), T.Arg('handle', T.Name(c_name))]))
+            ctor.body = [
+                T.Assign([T.Attribute(T.Name('self'), 'handle')], T.Name('handle'))
+            ]
+            class_def.body.append(ctor)
 
         return class_def
 
