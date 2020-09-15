@@ -3,6 +3,7 @@ from clang.cindex import Cursor, CursorKind, Type, SourceLocation, TypeKind, Tra
 
 import tide.generators.nodes as T
 from tide.utils.trie import Trie
+from tide.generators.debug import show_elem
 
 from astunparse import unparse
 
@@ -59,31 +60,6 @@ def type_mapping():
         'void *': T.Name('c_void_p'),
         'FILE *': T.Name('c_void_p'),
     }
-
-
-def show_elem(elem: Cursor):
-    print(elem.kind)
-    for attr_name in dir(elem):
-        if attr_name.startswith('__'):
-            continue
-
-        try:
-            attr = getattr(elem, attr_name)
-        except:
-            continue
-
-        if callable(attr):
-            v = None
-            try:
-                v = attr()
-            except:
-                pass
-            k = None
-            if hasattr(v, 'kind'):
-                k = v.kind
-            print('   ', attr_name, v, k)
-        else:
-            print('   ', attr_name, attr)
 
 
 def reformat_comment(comment):
@@ -302,6 +278,7 @@ class APIGenerator:
 
         Examples
         --------
+         >>> from tide.generators.clang_utils import parse_clang
         >>> tu, index = parse_clang('double add(double a, double b);')
         >>> modules = APIGenerator().generate(tu)
         >>> for k, m in modules.items():
@@ -475,6 +452,7 @@ class APIGenerator:
 
         Examples
         --------
+        >>> from tide.generators.clang_utils import parse_clang
         >>> tu, index = parse_clang('struct Point { int x, y; };')
         >>> modules = APIGenerator().generate(tu)
         >>> for k, m in modules.items():
@@ -536,6 +514,9 @@ class APIGenerator:
         values = '\n'.join(values)
         return f"\nclass {name}(enum):\n    pass\n\n{values}\n"
 
+    def generate_include(self, elem: Cursor):
+        log.debug(f'including f{elem.spelling}')
+
     def generate(self, tu):
         elem: Cursor
         for elem in tu.cursor.get_children():
@@ -553,6 +534,9 @@ class APIGenerator:
 
             elif elem.kind in (CursorKind.STRUCT_DECL, CursorKind.UNION_DECL):
                 expr = self.generate_struct_union(elem)
+
+            elif elem.kind == CursorKind.INCLUSION_DIRECTIVE:
+                self.generate_include(elem)
 
             elif elem.kind == CursorKind.TYPEDEF_DECL:
                 t1 = elem.type
@@ -591,23 +575,6 @@ class APIGenerator:
             #     show_elem(elem)
 
 
-def parse_clang(code, ext='c', source='string') -> TranslationUnit:
-    """Parse C code using clang, returns a translation unit
-
-    Examples
-    --------
-
-    >>> tu, index = parse_clang('double add(double a, double b){ return a + b; }')
-    >>> for elem in tu.cursor.get_children():
-    ...     print(elem.spelling, elem.kind)
-    add CursorKind.FUNCTION_DECL
-    """
-    fname = f'{source}.{ext}'
-    index = clang.cindex.Index.create()
-    tu = index.parse(path=fname, unsaved_files=[(fname, code)])
-    return tu, index
-
-
 def parse_function(fun):
     pass
 
@@ -624,7 +591,7 @@ if __name__ == '__main__':
     file = '/usr/include/SDL2/SDL.h'
     # file = '/home/setepenre/work/tide/tests/binding/typedef_func.h'
     # file = '/home/setepenre/work/tide/tests/binding/method_transformer.h'
-    tu = index.parse(file)
+    tu = index.parse(file, options=0x01)
 
     gen = APIGenerator()
     modules = gen.generate(tu)

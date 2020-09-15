@@ -1,4 +1,5 @@
 import ast
+from typing import List as ListT
 
 from tide.generators.visitor import NodeVisitor
 from tide.generators.nodes import *
@@ -30,9 +31,9 @@ class MetaVar:
 
 @dataclass
 class CppFile:
-    modules: List[str]
-    imports: List[str]
-    body: List[str]
+    modules: ListT[str]
+    imports: ListT[str]
+    body: ListT[str]
 
     def gen(self):
         namespaces = '\n'.join([f'namespace {name} {{' for name in self.modules])
@@ -124,7 +125,7 @@ class GenerateCpp(NodeVisitor):
         }
         return mapping[type(op)]
 
-    def generate_inheritance(self, bases: List[Expression]):
+    def generate_inheritance(self, bases: ListT[Expression]):
         if not bases:
             return ''
 
@@ -334,7 +335,7 @@ class GenerateCpp(NodeVisitor):
     def visit_With(self, node: With, **kwargs):
         print(node.items)
 
-    def generate_body(self, stmts: List[Statement], depth, **kwargs):
+    def generate_body(self, stmts: ListT[Statement], depth, **kwargs):
         self.indent_level += 1
         body = []
         for stmt in stmts:

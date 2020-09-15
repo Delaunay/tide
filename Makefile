@@ -11,7 +11,7 @@ travis-install:
 travis-doc: build-doc
 
 travis-unit:
-	COVERAGE_FILE=.coverage.doctest coverage run --parallel-mode -m doctest tide/generators/api_generators.py
+	COVERAGE_FILE=.coverage.doctest coverage run --parallel-mode -m pytest --doctest-modules tide
 
 rm-doc:
 	rm -rf docs/api

@@ -1,7 +1,8 @@
 import clang.cindex
 from clang.cindex import Cursor, CursorKind, Type, SourceLocation, TypeKind
 
-from tide.generators.api_generators import show_elem, get_comment, type_mapping
+from tide.generators.api_generators import get_comment, type_mapping
+from tide.generators.debug import show_elem
 import tide.generators.nodes as T
 import ctypes
 
@@ -10,7 +11,10 @@ from ast import Module
 import logging
 from astunparse import unparse, dump
 
+import re
 
+
+c_identifier = r'^[a-zA-Z_][a-zA-Z0-9_]*$'
 log = logging.getLogger('TIDE')
 
 
@@ -135,6 +139,7 @@ class APIGenerator:
         if type.kind == TypeKind.ENUM:
             return get_typename(type)
 
+        # print('gentype')
         show_elem(type)
         return get_typename(type)
 
@@ -318,6 +323,110 @@ class APIGenerator:
 
         return enum
 
+    def generate_include(self, elem: Cursor):
+        log.debug(f'including f{elem.spelling}')
+
+    def generate_macro_instantiation(self, elem: Cursor):
+        macro_definition = elem.get_definition()
+        if macro_definition is not None and macro_definition.location.file is None:
+            return
+
+        log.debug(f'Macro call {elem.spelling}')
+        # show_elem(elem)
+        args = list(elem.get_arguments())
+        children = list(elem.get_children())
+
+        if len(args) != 0:
+            for arg in args:
+                show_elem(arg)
+                assert False
+
+        if len(children) != 0:
+            for child in children:
+                show_elem(child)
+                assert False
+
+        # return T.Name(elem.spelling)
+
+    @staticmethod
+    def is_identifier(x: str):
+        if not x.isalpha():
+            return False
+
+        if x.isalnum():
+            return True
+
+
+
+    def generate_macro_definition(self, elem: Cursor):
+        # builtin macros
+        if elem.location.file is None:
+            return
+
+        log.debug(f'Macro definition {elem.spelling}')
+
+        args = list(elem.get_arguments())
+        children = list(elem.get_children())
+        tokens = list(elem.get_tokens())
+
+        if len(args) != 0:
+            for arg in args:
+                show_elem(arg)
+                assert False
+
+        if len(children) != 0:
+            for child in children:
+                show_elem(child)
+                assert False
+
+        raw_tokens = [t.spelling for t in tokens]
+
+        if len(raw_tokens) == 1:
+            return
+
+        def parse_macro(tokens):
+            name = tokens[0]
+            args = []
+
+            i = 0
+            if tokens[1] == '(':
+                i = 2
+                tok = tokens[i]
+                while tok != ')':
+                    if tok != ',':
+                        if re.match(c_identifier, tok) is not None:
+                            args.append(tok)
+                        else:
+                            return name, [], tokens[1:]
+
+                    i += 1
+                    tok = tokens[i]
+
+            return name, args, tokens[i + 1:]
+
+        name, args, body = parse_macro(raw_tokens)
+        print(raw_tokens)
+
+        # this try to convert a c expression into a python expression
+        # it is not really working though
+        c_expr = ''.join(body)
+        c_expr = c_expr.replace('->', '.')
+        c_expr = c_expr.replace('&&', ' and ')
+        c_expr = c_expr.replace('||', ' or ')
+
+        if len(args) == 0:
+            value = T.Name(c_expr)
+            if len(body) == 0:
+                value = T.Str(name)
+
+            return T.Assign([T.Name(name)], value)
+
+        func = T.FunctionDef(name, T.Arguments(args=[T.Arg(arg=a) for a in args]))
+        func.body = [
+            T.Return(T.Name(c_expr))
+        ]
+        return func
+
     def dispatch(self, elem):
         if elem.kind == CursorKind.FUNCTION_DECL:
             return self.generate_function(elem)
@@ -346,6 +455,15 @@ class APIGenerator:
         elif elem.kind == CursorKind.ENUM_DECL:
             return self.generate_enum(elem)
 
+        elif elem.kind == CursorKind.INCLUSION_DIRECTIVE:
+            return self.generate_include(elem)
+
+        elif elem.kind == CursorKind.MACRO_INSTANTIATION:
+            return self.generate_macro_instantiation(elem)
+
+        elif elem.kind == CursorKind.MACRO_DEFINITION:
+            return self.generate_macro_definition(elem)
+
         # Global variables
         elif elem.kind == CursorKind.VAR_DECL:
             print(f'{elem.spelling}: {self.generate_type(elem.type)}')
@@ -360,7 +478,7 @@ class APIGenerator:
         for elem in tu.cursor.get_children():
             loc: SourceLocation = elem.location
 
-            if not str(loc.file.name).startswith('/usr/include/SDL2'):
+            if loc.file is not None and not str(loc.file.name).startswith('/usr/include/SDL2'):
                continue
 
             try:
@@ -389,7 +507,7 @@ if __name__ == '__main__':
     file = '/usr/include/SDL2/SDL.h'
     # file = '/home/setepenre/work/tide/tests/binding/typedef_func.h'
     # file = '/home/setepenre/work/tide/tests/binding/nested_struct.h'
-    tu = index.parse(file)
+    tu = index.parse(file, options=0x01)
 
     for diag in tu.diagnostics:
         print(diag.format())
