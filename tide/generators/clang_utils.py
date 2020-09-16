@@ -49,8 +49,8 @@ def parse_c_expression(expression, include=None, ext='c', source='string') -> Tu
     When the expression is incorrect None is returned
 
     >>> from tide.generators.debug import traverse
-    >>> expr, type = parse_c_expression('__attribute__((deprecated))', include='SDL2/SDL.h')
-    None, None
+    >>> parse_c_expression('__attribute__((deprecated))', include='SDL2/SDL.h')
+    (None, None)
     """
     sources = []
     if include is not None:

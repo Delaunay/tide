@@ -225,10 +225,10 @@ class AugAssign(Statement):
     target: Expression
     op: Operator
     value: Expression
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
 
 
 #  stmt Constructor(AnnAssign, [Field(expr, target), Field(expr, annotation), Field(expr, value, opt=True), Field(int, simple)])

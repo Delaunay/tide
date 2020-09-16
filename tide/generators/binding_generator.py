@@ -15,7 +15,9 @@ from astunparse import unparse, dump
 import re
 
 
-c_identifier = r'^[a-zA-Z_][a-zA-Z0-9_]*$'
+# empty_line = re.compile(r'((\r\n|\n|\r)$)|(^(\r\n|\n|\r))|^\s*$', re.MULTILINE)
+empty_line = re.compile(r'^\s*$', re.MULTILINE)
+c_identifier = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
 log = logging.getLogger('TIDE')
 
 
@@ -38,13 +40,90 @@ def get_typename(type: Type) -> T.Name:
     return T.Name(typename)
 
 
+def compact(string):
+    return empty_line.sub('', string)
+
+
 class Unsupported(Exception):
     pass
 
 
 class APIGenerator:
+    """Generate C to python bindings given library headers"""
+
     def __init__(self):
         self.type_registry = type_mapping()
+        self.dispatcher = {
+            # Declarations
+            CursorKind.FUNCTION_DECL: self.generate_function,
+            CursorKind.STRUCT_DECL: self.generate_struct_union,
+            CursorKind.UNION_DECL: self.generate_struct_union,
+            CursorKind.TYPEDEF_DECL: self.generate_typedef,
+            CursorKind.ENUM_DECL: self.generate_enum,
+
+            # Operations
+            CursorKind.UNARY_OPERATOR: self.generate_unary_operator,
+            CursorKind.BINARY_OPERATOR: self.generate_binary_operator,
+            CursorKind.CSTYLE_CAST_EXPR: self.generate_c_cast,
+            CursorKind.VAR_DECL: self.generate_var_decl,
+
+            # Useless
+            CursorKind.UNEXPOSED_EXPR: self.ignore,
+            CursorKind.PAREN_EXPR: self.ignore,
+
+            # Leaves
+            CursorKind.TYPE_REF: self.generate_typeref,
+            CursorKind.DECL_REF_EXPR: self.generate_typeref,
+            CursorKind.INTEGER_LITERAL: self.generate_integer,
+            CursorKind.STRING_LITERAL: self.generate_string,
+
+            # Macros
+            CursorKind.INCLUSION_DIRECTIVE: self.generate_include,
+            CursorKind.MACRO_INSTANTIATION: self.generate_macro_instantiation,
+            CursorKind.MACRO_DEFINITION: self.generate_macro_definition,
+        }
+
+    def generate_var_decl(self, elem):
+        return T.AnnAssign(T.Name(elem.spelling), self.generate_type(elem.type), None)
+
+    def ignore(self, elem):
+        children = list(elem.get_children())
+        assert len(children) == 1
+        return self.dispatch(children[0])
+
+    def generate_typeref(self, elem):
+
+        return T.Name(elem.spelling)
+
+    def generate_typedef(self, elem):
+        """Generate a type alias
+
+        Examples
+        --------
+        >>> from tide.generators.clang_utils import parse_clang
+        >>> tu, index = parse_clang('typedef int int32;')
+        >>> module = APIGenerator().generate(tu)
+        >>> print(compact(unparse(module)))
+        <BLANKLINE>
+        int32 = c_int
+        <BLANKLINE>
+        """
+        t1 = elem.type
+        t2 = elem.underlying_typedef_type
+
+        log.debug(f'Typedef {t1.spelling} = {t2.spelling}')
+        # SDL_version = struct SDL_version
+        if t1.spelling == t2.spelling.split(' ')[-1]:
+            if t2.spelling not in self.type_registry:
+                self.type_registry[t2.spelling] = T.Name(t1.spelling, ctx=ast.Load())
+            return None
+
+        t2type: T.Name = self.generate_type(t2)
+        if t2.spelling not in self.type_registry:
+            self.type_registry[t2.spelling] = T.Name(t1.spelling, ctx=ast.Load())
+
+        expr = ast.Assign([T.Name(t1.spelling, ctx=ast.Store())], t2type)
+        return expr
 
     def generate_type(self, type, depth=0):
         if type.spelling == 'va_list':
@@ -145,6 +224,18 @@ class APIGenerator:
         return get_typename(type)
 
     def generate_function(self, elem: Cursor, depth=0):
+        """Generate a type alias
+
+        Examples
+        --------
+        >>> from tide.generators.clang_utils import parse_clang
+        >>> tu, index = parse_clang('float add(float a, float b);')
+        >>> module = APIGenerator().generate(tu)
+        >>> print(compact(unparse(module)))
+        <BLANKLINE>
+        add = _bind('add', [c_float, c_float], c_float)
+        <BLANKLINE>
+        """
         log.debug(f'{d(depth)}Generate function `{elem.spelling}`')
         definition: Cursor = elem.get_definition()
 
@@ -270,6 +361,22 @@ class APIGenerator:
             raise RuntimeError('')
 
     def generate_struct_union(self, elem: Cursor, depth=1, nested=False, rename=None):
+        """Generate a type alias
+
+        Examples
+        --------
+        >>> from tide.generators.clang_utils import parse_clang
+        >>> tu, index = parse_clang('struct Point { float x, y;};')
+        >>> module = APIGenerator().generate(tu)
+        >>> print(compact(unparse(module)))
+        <BLANKLINE>
+        class Point(Structure):
+            pass
+        <BLANKLINE>
+        Point._fields_ = [('x', c_float), ('y', c_float)]
+        <BLANKLINE>
+        """
+
         log.debug(f'{d(depth)}Generate struct `{elem.spelling}`')
         pyname = self.get_name(elem, rename=rename, depth=depth + 1)
 
@@ -363,7 +470,6 @@ class APIGenerator:
             return
 
         log.debug(f'Macro definition {elem.spelling}')
-        show_elem(elem)
 
         args = list(elem.get_arguments())
         children = list(elem.get_children())
@@ -466,7 +572,12 @@ class APIGenerator:
             type, expr = children
             traverse(type)
             traverse(expr)
-            return T.Call(T.Name(self.dispatch(type)), [self.dispatch(expr)])
+
+            typecast = self.dispatch(type)
+            if isinstance(typecast, str):
+                typecast = T.Name(typecast)
+
+            return T.Call(typecast, [self.dispatch(expr)])
 
         if len(children) == 1:
             return self.dispatch(children[0])
@@ -554,100 +665,113 @@ class APIGenerator:
         return T.BinOp(left=lhs, op=op, right=rhs)
 
     def dispatch(self, elem):
-        if elem.kind == CursorKind.FUNCTION_DECL:
-            return self.generate_function(elem)
+        fun = self.dispatcher.get(elem.kind, show_elem)
+        return fun(elem)
 
-        elif elem.kind in (CursorKind.STRUCT_DECL, CursorKind.UNION_DECL):
-            return self.generate_struct_union(elem)
+    def sorted_children(self, cursor):
+        """Because macros are processed first we have have issues when transforming them to functions
+        so we need to insert them in their right position in a kind of stable merge kind of operation.
+        This does not guarantee macros to work because in C they can be defined earlier than the entities they used
+        although in practice they should be close
 
-        elif elem.kind == CursorKind.TYPEDEF_DECL:
-            t1 = elem.type
-            t2 = elem.underlying_typedef_type
+        This also allow us to group Macro and their definitions.
+        For example is is often the case that function definition have additional attributes prepended through macros.
+        """
+        def is_not_builtin(elem):
+            return elem.location.file is not None
 
-            log.debug(f'Typedef {t1.spelling} = {t2.spelling}')
-            # SDL_version = struct SDL_version
-            if t1.spelling == t2.spelling.split(' ')[-1]:
-                if t2.spelling not in self.type_registry:
-                    self.type_registry[t2.spelling] = T.Name(t1.spelling, ctx=ast.Load())
-                return None
+        elements = list(filter(is_not_builtin, cursor.get_children()))
 
-            t2type: T.Name = self.generate_type(t2)
-            if t2.spelling not in self.type_registry:
-                self.type_registry[t2.spelling] = T.Name(t1.spelling, ctx=ast.Load())
+        def is_macro(elem):
+            return elem.kind in (CursorKind.MACRO_DEFINITION, CursorKind.MACRO_INSTANTIATION, CursorKind.INCLUSION_DIRECTIVE)
 
-            expr = ast.Assign([T.Name(t1.spelling, ctx=ast.Store())], t2type)
-            return expr
+        def not_macro(elem):
+            return not is_macro(elem)
 
-        elif elem.kind == CursorKind.ENUM_DECL:
-            return self.generate_enum(elem)
+        file_order = dict()
+        for e in elements:
+            if e.location.file.name not in file_order:
+                file_order[e.location.file.name] = len(file_order)
 
-        elif elem.kind == CursorKind.INTEGER_LITERAL:
-            return self.generate_integer(elem)
+        #
+        macros = list(filter(is_macro, reversed(elements)))
+        not_macros = list(filter(not_macro, reversed(elements)))
 
-        elif elem.kind == CursorKind.STRING_LITERAL:
-            return self.generate_string(elem)
+        assert len(elements) > 0
+        assert len(macros) + len(not_macros) == len(elements)
 
-        elif elem.kind == CursorKind.INCLUSION_DIRECTIVE:
-            return self.generate_include(elem)
+        merged = []
 
-        elif elem.kind == CursorKind.MACRO_INSTANTIATION:
-            return self.generate_macro_instantiation(elem)
+        def pop(array):
+            if len(array) > 0:
+                return array.pop()
 
-        elif elem.kind == CursorKind.MACRO_DEFINITION:
-            return self.generate_macro_definition(elem)
+        macro = pop(macros)
+        expr = pop(not_macros)
 
-        elif elem.kind == CursorKind.UNARY_OPERATOR:
-            return self.generate_unary_operator(elem)
+        while len(not_macros) > 0 or len(macros) > 0 or expr is not None or macro is not None:
+            # dump the remaining macros/expr
+            if expr is None and macro is not None:
+                merged.append(macro)
+                macro = pop(macros)
 
-        elif elem.kind == CursorKind.BINARY_OPERATOR:
-            return self.generate_binary_operator(elem)
+            elif macro is None and expr is not None:
+                merged.append(expr)
+                expr = pop(not_macros)
 
-        elif elem.kind == CursorKind.DECL_REF_EXPR:
-            return T.Name(elem.spelling)
+            elif macro.location.file.name != expr.location.file.name:
+                macro_file = file_order[macro.location.file.name]
+                expr_file = file_order[expr.location.file.name]
 
-        elif elem.kind in (CursorKind.UNEXPOSED_EXPR, CursorKind.PAREN_EXPR):
-            children = list(elem.get_children())
-            assert len(children) == 1
-            return self.dispatch(children[0])
+                if macro_file > expr_file:
+                    merged.append(macro)
+                    macro = pop(macros)
+                else:
+                    merged.append(expr)
+                    expr = pop(not_macros)
 
-        elif elem.kind == CursorKind.CSTYLE_CAST_EXPR:
-            return self.generate_c_cast(elem)
+            elif macro.location.file.name == expr.location.file.name:
+                if macro.location.line > expr.location.line:
+                    merged.append(expr)
+                    expr = pop(not_macros)
+                else:
+                    merged.append(macro)
+                    macro = pop(macros)
 
-        # Global variables
-        elif elem.kind == CursorKind.VAR_DECL:
-            print(f'{elem.spelling}: {self.generate_type(elem.type)}')
-        else:
-            show_elem(elem)
+            else:
+                raise RuntimeError()
+
+        assert len(merged) == len(elements)
+        return merged
 
     def generate(self, tu):
         module: T.Module = Module()
         module.body = []
 
         elem: Cursor
-        for elem in tu.cursor.get_children():
+        for elem in self.sorted_children(tu.cursor):
             loc: SourceLocation = elem.location
 
-            if loc.file is not None and not str(loc.file.name).startswith('/usr/include/SDL2'):
-               continue
+            # if loc.file is not None and not str(loc.file.name).startswith('/usr/include/SDL2'):
+            #    continue
 
             try:
                 expr = self.dispatch(elem)
 
                 if expr is not None and not isinstance(expr, str):
-
                     if isinstance(expr, list):
                         for e in expr:
                             module.body.append(T.Expr(e))
                     else:
                         module.body.append(T.Expr(expr))
-
             except Unsupported:
+                print(elem)
                 pass
 
         return module
 
 
-if __name__ == '__main__':
+def generate_bindings():
     import sys
     logging.basicConfig(stream=sys.stdout)
     log.setLevel(logging.DEBUG)
@@ -673,39 +797,23 @@ if __name__ == '__main__':
         f.write("""import os\n""")
         f.write("""from ctypes import *\n""")
         f.write("""from tide.runtime.loader import DLL\n""")
+        f.write("""import tide.runtime.ctypes_ext\n""")
         f.write("""_lib = DLL("SDL2", ["SDL2", "SDL2-2.0"], os.getenv("PYSDL2_DLL_PATH"))\n""")
         f.write("""_bind = _lib.bind_function\n""")
         f.write(unparse(module))
 
-    import pprint
-    # pprint.pprint(gen.type_registry)
 
-    # import ast
-    # ast.dump(module)
+if __name__ == '__main__':
+    from tide.generators.clang_utils import parse_clang
 
-    # from ast import FunctionDef, Pass
-    #
-    # class_def = T.ClassDef(name='MyClass')
-    #
-    # method = T.FunctionDef('MyFun')
-    # method.body = [Pass()]
-    # method.args = T.Arguments(
-    #     args=[T.Arg(arg='self', annotation=T.Name('MyClass'))],
-    # )
-    #
-    # class_def.body.append(method)
-    # module: T.Module = Module()
-    # module.body = [class_def]
+    tu, index = parse_clang('typedef int int32;')
 
-    import ast
-    mod = ast.parse("""
-class check:
-    \"\"\"ABC\"\"\"
-    pass
+    for diag in tu.diagnostics:
+        print(diag.format())
 
-a = check
-    """)
+    print(list(tu.cursor.get_children()))
 
-    print(dump(mod))
-    print(unparse(mod))
+    module = APIGenerator().generate(tu)
+
+    print(unparse(module))
 
