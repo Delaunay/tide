@@ -25,6 +25,9 @@ class Slice(Node):
     pass
 
 
+class Operand(Node):
+    pass
+
 class ExpressionContext(Node):
     pass
 
@@ -473,10 +476,10 @@ class BinOp(Expression):
 class UnaryOp(Expression):
     op: 'UnaryOp'
     operand: Expression
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
 
 
 #  expr Constructor(Lambda, [Field(arguments, args), Field(expr, body)])
@@ -898,25 +901,25 @@ class FloorDiv(Operator):
 
 #  unaryop Constructor(Invert, [])
 @dataclass
-class Invert(UnaryOp):
+class Invert(Operand):
     pass
 
 
 #  unaryop Constructor(Not, [])
 @dataclass
-class Not(UnaryOp):
+class Not(Operand):
     pass
 
 
 #  unaryop Constructor(UAdd, [])
 @dataclass
-class UAdd(UnaryOp):
+class UAdd(Operand):
     pass
 
 
 #  unaryop Constructor(USub, [])
 @dataclass
-class USub(UnaryOp):
+class USub(Operand):
     pass
 
 

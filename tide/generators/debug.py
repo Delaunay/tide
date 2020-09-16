@@ -52,7 +52,13 @@ bad_attributes = {
     CursorKind.MACRO_DEFINITION: {'tls_kind', 'storage_class'},
     CursorKind.MACRO_INSTANTIATION: {'tls_kind', 'storage_class'},
     CursorKind.DECL_STMT: {'tls_kind'},
-    CursorKind.PAREN_EXPR: {'tls_kind'}
+    CursorKind.PAREN_EXPR: {'tls_kind'},
+    CursorKind.CSTYLE_CAST_EXPR: {'tls_kind'},
+    CursorKind.INTEGER_LITERAL: {'tls_kind'},
+    CursorKind.STRING_LITERAL: {'tls_kind'},
+    CursorKind.UNARY_OPERATOR: {'tls_kind'},
+    CursorKind.BINARY_OPERATOR: {'tls_kind'},
+    CursorKind.DECL_REF_EXPR: {'tls_kind'},
 }
 
 
@@ -93,10 +99,15 @@ def show_elem(elem: Cursor):
 
 def traverse(elem: Cursor, depth: int = 0):
     indent = ' ' * depth
+
+    if elem is None:
+        print(f'{indent}None')
+        return
     print(f'{indent}{elem.kind}')
 
-    for child in elem.get_children():
-        traverse(child, depth + 1)
+    if hasattr(elem, 'get_children'):
+        for child in elem.get_children():
+            traverse(child, depth + 1)
 
 
 def show_file(filename):

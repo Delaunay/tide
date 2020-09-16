@@ -2,7 +2,8 @@ import clang.cindex
 from clang.cindex import Cursor, CursorKind, Type, SourceLocation, TypeKind
 
 from tide.generators.api_generators import get_comment, type_mapping
-from tide.generators.debug import show_elem
+from tide.generators.clang_utils import parse_c_expression
+from tide.generators.debug import show_elem, traverse
 import tide.generators.nodes as T
 import ctypes
 
@@ -356,14 +357,13 @@ class APIGenerator:
         if x.isalnum():
             return True
 
-
-
     def generate_macro_definition(self, elem: Cursor):
         # builtin macros
         if elem.location.file is None:
             return
 
         log.debug(f'Macro definition {elem.spelling}')
+        show_elem(elem)
 
         args = list(elem.get_arguments())
         children = list(elem.get_children())
@@ -384,6 +384,9 @@ class APIGenerator:
         if len(raw_tokens) == 1:
             return
 
+        # it is hard to know if we have a `callable` macro or not
+        # in C/C++ the difference is a space between the defined name and the parenthesis
+        # but Clang erase all superfluous space so we cannot know right away
         def parse_macro(tokens):
             name = tokens[0]
             args = []
@@ -394,6 +397,7 @@ class APIGenerator:
                 tok = tokens[i]
                 while tok != ')':
                     if tok != ',':
+                        # argument is not an identifier
                         if re.match(c_identifier, tok) is not None:
                             args.append(tok)
                         else:
@@ -402,20 +406,47 @@ class APIGenerator:
                     i += 1
                     tok = tokens[i]
 
-            return name, args, tokens[i + 1:]
+            # arguments should be used in the body
+            # else we think it is a macro without arg
+            body = tokens[i + 1:]
+            for arg in reversed(args):
+                if not arg in body:
+                    return name, [], tokens[1:]
+
+            if len(args) == 0:
+                return name, [], tokens[1:]
+
+            return name, args, body
 
         name, args, body = parse_macro(raw_tokens)
         print(raw_tokens)
 
         # this try to convert a c expression into a python expression
         # it is not really working though
+        # c_expr = ''.join(body)
+        # c_expr = c_expr.replace('->', '.')
+        # c_expr = c_expr.replace('&&', ' and ')
+        # c_expr = c_expr.replace('||', ' or ')
+
         c_expr = ''.join(body)
-        c_expr = c_expr.replace('->', '.')
-        c_expr = c_expr.replace('&&', ' and ')
-        c_expr = c_expr.replace('||', ' or ')
+        expr, type = parse_c_expression(c_expr, include=elem.location.file.name)
+
+        # expr is not which means we were not able to parse it
+        # Example: __attribute__((deprecated))
+        if expr is None:
+            return
+
+        # done
+        py_expr = self.dispatch(expr)
+
+        if py_expr is None:
+            traverse(expr)
+            traverse(type)
+
+        assert py_expr is not None
 
         if len(args) == 0:
-            value = T.Name(c_expr)
+            value = py_expr
             if len(body) == 0:
                 value = T.Str(name)
 
@@ -423,9 +454,104 @@ class APIGenerator:
 
         func = T.FunctionDef(name, T.Arguments(args=[T.Arg(arg=a) for a in args]))
         func.body = [
-            T.Return(T.Name(c_expr))
+            T.Return(py_expr)
         ]
         return func
+
+    def generate_c_cast(self, elem):
+        show_elem(elem)
+        children = list(elem.get_children())
+
+        if len(children) == 2:
+            type, expr = children
+            traverse(type)
+            traverse(expr)
+            return T.Call(T.Name(self.dispatch(type)), [self.dispatch(expr)])
+
+        if len(children) == 1:
+            return self.dispatch(children[0])
+
+        return None
+
+    def generate_integer(self, elem: Cursor):
+        try:
+            val = list(elem.get_tokens())[0].spelling
+
+            val = val.replace('u', '')
+            val = val.replace('ll', '')
+            val = val.replace('U', '')
+
+            base = 10
+            if '0x' in val:
+                base = 16
+
+            return T.Constant(int(val, base=base))
+        except IndexError:
+            # this integer comes from __LINE__ macro
+            # this is not correct at all, this should return the line on which it is called
+            # but we cannot really do that in python I think
+            return T.Constant(int(elem.location.line))
+
+    def generate_string(self, elem):
+        return T.Constant(elem.spelling)
+
+    def generate_unary_operator(self, elem):
+        expr = list(elem.get_children())
+        assert len(expr) == 1
+
+        expr = self.dispatch(expr[0])
+        op_tok = [t.spelling for t in elem.get_tokens()][0]
+
+        op = None
+        if op_tok == '-':
+            op = T.USub()
+
+        if op_tok == '~':
+            op = T.Invert()
+
+        if op is None:
+            print([t.spelling for t in elem.get_tokens()])
+
+        assert op is not None
+        return T.UnaryOp(op=op, operand=expr)
+
+    binary_operators = {'+', '-', '|'}
+
+    def generate_binary_operator(self, elem):
+        exprs = list(elem.get_children())
+        assert len(exprs) == 2
+
+        lhs = self.dispatch(exprs[0])
+        rhs = self.dispatch(exprs[1])
+
+        op_toks = [t.spelling for t in elem.get_tokens()]
+
+        # print(op_toks)
+        # print(lhs)
+        #
+        # print(elem._kind_id)
+        # print(elem.xdata)
+        # print(elem.data[0])
+        # print(elem.data[1])
+        # print(elem.data[2])
+        #
+        # show_elem(elem)
+        # print(elem.extent.spelling)
+
+        try:
+            op_tok = op_toks[1]
+        except:
+            op_tok = '|'
+
+        op = None
+        if op_tok == '<<':
+            op = T.LShift()
+        elif op_tok == '>>':
+            op = T.RShift()
+        elif op_tok == '|':
+            op = T.BitOr()
+
+        return T.BinOp(left=lhs, op=op, right=rhs)
 
     def dispatch(self, elem):
         if elem.kind == CursorKind.FUNCTION_DECL:
@@ -455,6 +581,12 @@ class APIGenerator:
         elif elem.kind == CursorKind.ENUM_DECL:
             return self.generate_enum(elem)
 
+        elif elem.kind == CursorKind.INTEGER_LITERAL:
+            return self.generate_integer(elem)
+
+        elif elem.kind == CursorKind.STRING_LITERAL:
+            return self.generate_string(elem)
+
         elif elem.kind == CursorKind.INCLUSION_DIRECTIVE:
             return self.generate_include(elem)
 
@@ -463,6 +595,23 @@ class APIGenerator:
 
         elif elem.kind == CursorKind.MACRO_DEFINITION:
             return self.generate_macro_definition(elem)
+
+        elif elem.kind == CursorKind.UNARY_OPERATOR:
+            return self.generate_unary_operator(elem)
+
+        elif elem.kind == CursorKind.BINARY_OPERATOR:
+            return self.generate_binary_operator(elem)
+
+        elif elem.kind == CursorKind.DECL_REF_EXPR:
+            return T.Name(elem.spelling)
+
+        elif elem.kind in (CursorKind.UNEXPOSED_EXPR, CursorKind.PAREN_EXPR):
+            children = list(elem.get_children())
+            assert len(children) == 1
+            return self.dispatch(children[0])
+
+        elif elem.kind == CursorKind.CSTYLE_CAST_EXPR:
+            return self.generate_c_cast(elem)
 
         # Global variables
         elif elem.kind == CursorKind.VAR_DECL:

@@ -28,22 +28,29 @@ class ParsingError(Exception):
     pass
 
 
-def parse_c_expression(expression, include=None, ext='c', source='string') -> Cursor:
-    """Hack the clang parser to parse an expression only
-
+def parse_c_expression(expression, include=None, ext='c', source='string') -> Tuple[Cursor, Cursor]:
+    """Hack the clang parser to parse a single expression
     This is used to parse macros and generate corresponding function when possible
 
     Examples
     --------
 
     >>> from tide.generators.debug import traverse
-    >>> expr = parse_c_expression('((Sint8)0x7F)', include='SDL2/SDL.h')
+    >>> expr, type = parse_c_expression('((Sint8)0x7F)', include='SDL2/SDL.h')
     >>> traverse(expr)
-    CursorKind.PAREN_EXPR
-     CursorKind.CSTYLE_CAST_EXPR
-      CursorKind.TYPE_REF
-      CursorKind.INTEGER_LITERAL
+    CursorKind.UNEXPOSED_EXPR
+     CursorKind.PAREN_EXPR
+      CursorKind.CSTYLE_CAST_EXPR
+       CursorKind.TYPE_REF
+       CursorKind.INTEGER_LITERAL
+    >>> traverse(type)
+    TypeKind.INT
 
+    When the expression is incorrect None is returned
+
+    >>> from tide.generators.debug import traverse
+    >>> expr, type = parse_c_expression('__attribute__((deprecated))', include='SDL2/SDL.h')
+    None, None
     """
     sources = []
     if include is not None:
@@ -57,27 +64,34 @@ def parse_c_expression(expression, include=None, ext='c', source='string') -> Cu
         CursorKind.FUNCTION_DECL,
         CursorKind.COMPOUND_STMT,
         CursorKind.DECL_STMT,
-        CursorKind.VAR_DECL,
-        CursorKind.UNEXPOSED_EXPR
+        CursorKind.VAR_DECL
     ]
 
     child = list(tu.cursor.get_children())[-1]
+    result_type = None
 
     for p in path:
-        assert child.kind == p
+        assert child.kind == p, f'Expected {child.kind} == {p}'
 
         if child.kind == CursorKind.VAR_DECL:
             assert child.spelling == 'x_203234234'
+            result_type = child.type
 
-        child = list(child.get_children())[0]
+        children = list(child.get_children())
 
-    return child
+        if len(children) == 0:
+            return None, None
+
+        child = children[0]
+
+    return child, result_type
 
 
 if __name__ == '__main__':
-    expr = parse_c_expression('((Sint8)0x7F)', include='SDL2/SDL.h')
+    expr, type = parse_c_expression('((Sint8)0x7F)', include='SDL2/SDL.h')
 
     traverse(expr)
+    traverse(type)
 
 
 
