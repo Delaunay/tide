@@ -48,6 +48,83 @@ class Unsupported(Exception):
     pass
 
 
+def sorted_children(cursor):
+    """Because macros are processed first we have have issues when transforming them to functions
+    so we need to insert them in their right position in a kind of stable merge kind of operation.
+    This does not guarantee macros to work because in C they can be defined earlier than the entities they used
+    although in practice they should be close
+
+    This also allow us to group Macro and their definitions.
+    For example is is often the case that function definition have additional attributes prepended through macros.
+    """
+    def is_not_builtin(elem):
+        return elem.location.file is not None
+
+    elements = list(filter(is_not_builtin, cursor.get_children()))
+
+    def is_macro(elem):
+        return elem.kind in (CursorKind.MACRO_DEFINITION, CursorKind.MACRO_INSTANTIATION, CursorKind.INCLUSION_DIRECTIVE)
+
+    def not_macro(elem):
+        return not is_macro(elem)
+
+    file_order = dict()
+    for e in elements:
+        if e.location.file.name not in file_order:
+            file_order[e.location.file.name] = len(file_order)
+
+    #
+    macros = list(filter(is_macro, reversed(elements)))
+    not_macros = list(filter(not_macro, reversed(elements)))
+
+    assert len(elements) > 0
+    assert len(macros) + len(not_macros) == len(elements)
+
+    merged = []
+
+    def pop(array):
+        if len(array) > 0:
+            return array.pop()
+
+    macro = pop(macros)
+    expr = pop(not_macros)
+
+    while len(not_macros) > 0 or len(macros) > 0 or expr is not None or macro is not None:
+        # dump the remaining macros/expr
+        if expr is None and macro is not None:
+            merged.append(macro)
+            macro = pop(macros)
+
+        elif macro is None and expr is not None:
+            merged.append(expr)
+            expr = pop(not_macros)
+
+        elif macro.location.file.name != expr.location.file.name:
+            macro_file = file_order[macro.location.file.name]
+            expr_file = file_order[expr.location.file.name]
+
+            if macro_file > expr_file:
+                merged.append(macro)
+                macro = pop(macros)
+            else:
+                merged.append(expr)
+                expr = pop(not_macros)
+
+        elif macro.location.file.name == expr.location.file.name:
+            if macro.location.line > expr.location.line:
+                merged.append(expr)
+                expr = pop(not_macros)
+            else:
+                merged.append(macro)
+                macro = pop(macros)
+
+        else:
+            raise RuntimeError()
+
+    assert len(merged) == len(elements)
+    return merged
+
+
 class APIGenerator:
     """Generate C to python bindings given library headers"""
 
@@ -93,7 +170,6 @@ class APIGenerator:
         return self.dispatch(children[0])
 
     def generate_typeref(self, elem):
-
         return T.Name(elem.spelling)
 
     def generate_typedef(self, elem):
@@ -571,13 +647,6 @@ class APIGenerator:
         name, args, body = parse_macro(raw_tokens)
         log.debug(raw_tokens)
 
-        # this try to convert a c expression into a python expression
-        # it is not really working though
-        # c_expr = ''.join(body)
-        # c_expr = c_expr.replace('->', '.')
-        # c_expr = c_expr.replace('&&', ' and ')
-        # c_expr = c_expr.replace('||', ' or ')
-
         c_expr = ''.join(body)
         include = elem.location.file.name
         if include == 'temporary_buffer_1234.c':
@@ -726,82 +795,6 @@ class APIGenerator:
     def dispatch(self, elem):
         fun = self.dispatcher.get(elem.kind, show_elem)
         return fun(elem)
-
-    def sorted_children(self, cursor):
-        """Because macros are processed first we have have issues when transforming them to functions
-        so we need to insert them in their right position in a kind of stable merge kind of operation.
-        This does not guarantee macros to work because in C they can be defined earlier than the entities they used
-        although in practice they should be close
-
-        This also allow us to group Macro and their definitions.
-        For example is is often the case that function definition have additional attributes prepended through macros.
-        """
-        def is_not_builtin(elem):
-            return elem.location.file is not None
-
-        elements = list(filter(is_not_builtin, cursor.get_children()))
-
-        def is_macro(elem):
-            return elem.kind in (CursorKind.MACRO_DEFINITION, CursorKind.MACRO_INSTANTIATION, CursorKind.INCLUSION_DIRECTIVE)
-
-        def not_macro(elem):
-            return not is_macro(elem)
-
-        file_order = dict()
-        for e in elements:
-            if e.location.file.name not in file_order:
-                file_order[e.location.file.name] = len(file_order)
-
-        #
-        macros = list(filter(is_macro, reversed(elements)))
-        not_macros = list(filter(not_macro, reversed(elements)))
-
-        assert len(elements) > 0
-        assert len(macros) + len(not_macros) == len(elements)
-
-        merged = []
-
-        def pop(array):
-            if len(array) > 0:
-                return array.pop()
-
-        macro = pop(macros)
-        expr = pop(not_macros)
-
-        while len(not_macros) > 0 or len(macros) > 0 or expr is not None or macro is not None:
-            # dump the remaining macros/expr
-            if expr is None and macro is not None:
-                merged.append(macro)
-                macro = pop(macros)
-
-            elif macro is None and expr is not None:
-                merged.append(expr)
-                expr = pop(not_macros)
-
-            elif macro.location.file.name != expr.location.file.name:
-                macro_file = file_order[macro.location.file.name]
-                expr_file = file_order[expr.location.file.name]
-
-                if macro_file > expr_file:
-                    merged.append(macro)
-                    macro = pop(macros)
-                else:
-                    merged.append(expr)
-                    expr = pop(not_macros)
-
-            elif macro.location.file.name == expr.location.file.name:
-                if macro.location.line > expr.location.line:
-                    merged.append(expr)
-                    expr = pop(not_macros)
-                else:
-                    merged.append(macro)
-                    macro = pop(macros)
-
-            else:
-                raise RuntimeError()
-
-        assert len(merged) == len(elements)
-        return merged
 
     def generate(self, tu):
         module: T.Module = Module()

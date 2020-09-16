@@ -1,6 +1,7 @@
 import clang.cindex
 from clang.cindex import Cursor, CursorKind, Type, SourceLocation, TypeKind, TranslationUnit
 
+from tide.generators.binding_generator import sorted_children
 import tide.generators.nodes as T
 from tide.utils.trie import Trie
 from tide.generators.debug import show_elem
@@ -284,7 +285,7 @@ class APIGenerator:
         >>> for k, m in modules.items():
         ...     print(f'# {k}')
         ...     print(unparse(m))
-        # string.c
+        # temporary_buffer_1234.c
         <BLANKLINE>
         <BLANKLINE>
         <BLANKLINE>
@@ -458,15 +459,12 @@ class APIGenerator:
         >>> for k, m in modules.items():
         ...     print(f'# {k}')
         ...     print(unparse(m))
-        # string.c
+        # temporary_buffer_1234.c
         <BLANKLINE>
         <BLANKLINE>
         <BLANKLINE>
         class Point(Structure):
             _fields_ = [('x', int), ('y', int)]
-        <BLANKLINE>
-            def __init__(self, handle: Point):
-                self.handle = handle
         <BLANKLINE>
         """
 
@@ -518,10 +516,8 @@ class APIGenerator:
         log.debug(f'including f{elem.spelling}')
 
     def generate(self, tu):
-        from tide.generators.binding_generator import APIGenerator as b
-
         elem: Cursor
-        for elem in b.sorted_children(None, tu.cursor):
+        for elem in sorted_children(None, tu.cursor):
             loc: SourceLocation = elem.location
 
             self.module = self.modules.get(loc.file.name, T.Module(body=[]))
