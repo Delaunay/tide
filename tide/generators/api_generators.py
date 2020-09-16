@@ -518,8 +518,10 @@ class APIGenerator:
         log.debug(f'including f{elem.spelling}')
 
     def generate(self, tu):
+        from tide.generators.binding_generator import APIGenerator as b
+
         elem: Cursor
-        for elem in tu.cursor.get_children():
+        for elem in b.sorted_children(None, tu.cursor):
             loc: SourceLocation = elem.location
 
             self.module = self.modules.get(loc.file.name, T.Module(body=[]))

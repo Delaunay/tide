@@ -75,6 +75,7 @@ class APIGenerator:
             CursorKind.TYPE_REF: self.generate_typeref,
             CursorKind.DECL_REF_EXPR: self.generate_typeref,
             CursorKind.INTEGER_LITERAL: self.generate_integer,
+            CursorKind.FLOATING_LITERAL: self.generate_float,
             CursorKind.STRING_LITERAL: self.generate_string,
 
             # Macros
@@ -361,7 +362,7 @@ class APIGenerator:
             raise RuntimeError('')
 
     def generate_struct_union(self, elem: Cursor, depth=1, nested=False, rename=None):
-        """Generate a type alias
+        """Generate a struct or union alias
 
         Examples
         --------
@@ -374,6 +375,18 @@ class APIGenerator:
             pass
         <BLANKLINE>
         Point._fields_ = [('x', c_float), ('y', c_float)]
+        <BLANKLINE>
+
+
+        >>> from tide.generators.clang_utils import parse_clang
+        >>> tu, index = parse_clang('union Point { float x; int y;};')
+        >>> module = APIGenerator().generate(tu)
+        >>> print(compact(unparse(module)))
+        <BLANKLINE>
+        class Point(Union):
+            pass
+        <BLANKLINE>
+        Point._fields_ = [('x', c_float), ('y', c_int)]
         <BLANKLINE>
         """
 
@@ -412,6 +425,24 @@ class APIGenerator:
         return [T.ClassDef(name=pyname, bases=[T.Name(base)], body=body), fields]
 
     def generate_enum(self, elem: Cursor, depth=0):
+        """ Generate a enum
+
+        Examples
+        --------
+        >>> from tide.generators.clang_utils import parse_clang
+        >>> tu, index = parse_clang('enum Colors { Red, Green, Blue;};')
+        >>> module = APIGenerator().generate(tu)
+        >>> print(compact(unparse(module)))
+        <BLANKLINE>
+        Colors = c_int
+        <BLANKLINE>
+        Red = 0
+        <BLANKLINE>
+        Green = 1
+        <BLANKLINE>
+        Blue = 2
+        <BLANKLINE>
+        """
         log.debug(f'{d(depth)}Generate Enum')
         name = self.get_name(elem)
 
@@ -465,6 +496,19 @@ class APIGenerator:
             return True
 
     def generate_macro_definition(self, elem: Cursor):
+        """Transform a macro into a function if possible
+
+        Examples
+        --------
+        >>> from tide.generators.clang_utils import parse_clang
+        >>> tu, index = parse_clang('#define PI 3.14')
+        >>> module = APIGenerator().generate(tu)
+        >>> print(compact(unparse(module)))
+        <BLANKLINE>
+        PI = 3.14
+        <BLANKLINE>
+
+        """
         # builtin macros
         if elem.location.file is None:
             return
@@ -525,7 +569,7 @@ class APIGenerator:
             return name, args, body
 
         name, args, body = parse_macro(raw_tokens)
-        print(raw_tokens)
+        log.debug(raw_tokens)
 
         # this try to convert a c expression into a python expression
         # it is not really working though
@@ -535,11 +579,21 @@ class APIGenerator:
         # c_expr = c_expr.replace('||', ' or ')
 
         c_expr = ''.join(body)
-        expr, type = parse_c_expression(c_expr, include=elem.location.file.name)
+        include = elem.location.file.name
+        if include == 'temporary_buffer_1234.c':
+            include = None
+
+        expr, type, tu = parse_c_expression(c_expr, include=include)
+
+        for diag in tu.diagnostics:
+            log.debug(diag.format())
+
+        log.debug(f'{c_expr}, {expr}, {type}')
 
         # expr is not which means we were not able to parse it
         # Example: __attribute__((deprecated))
         if expr is None:
+            log.warning(f'Ignoring macro {name} because it was not convertible')
             return
 
         # done
@@ -605,6 +659,11 @@ class APIGenerator:
 
     def generate_string(self, elem):
         return T.Constant(elem.spelling)
+
+    def generate_float(self, elem):
+        toks = [t.spelling for t in elem.get_tokens()]
+        assert len(toks) == 1
+        return T.Constant(float(toks[0]))
 
     def generate_unary_operator(self, elem):
         expr = list(elem.get_children())
@@ -806,12 +865,15 @@ def generate_bindings():
 if __name__ == '__main__':
     from tide.generators.clang_utils import parse_clang
 
-    tu, index = parse_clang('typedef int int32;')
+    tu, index = parse_clang('#define PI 3.14')
 
     for diag in tu.diagnostics:
         print(diag.format())
 
     print(list(tu.cursor.get_children()))
+
+    for i in list(tu.cursor.get_children()):
+        print(i.kind)
 
     module = APIGenerator().generate(tu)
 

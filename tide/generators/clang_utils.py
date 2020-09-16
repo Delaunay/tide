@@ -7,20 +7,28 @@ from clang.cindex import TranslationUnit, Index, CursorKind, Cursor
 from tide.generators.debug import show_elem, traverse
 
 
-def parse_clang(code, ext='c', source='string') -> Tuple[TranslationUnit, Index]:
+def is_not_builtin(elem):
+    return elem.location.file is not None
+
+
+def no_builtin(children):
+    return filter(is_not_builtin, children)
+
+
+def parse_clang(code, ext='c', source='temporary_buffer_1234') -> Tuple[TranslationUnit, Index]:
     """Parse C code using clang, returns a translation unit
 
     Examples
     --------
 
     >>> tu, index = parse_clang('double add(double a, double b){ return a + b; }')
-    >>> for elem in tu.cursor.get_children():
+    >>> for elem in no_builtin(tu.cursor.get_children()):
     ...     print(elem.spelling, elem.kind)
     add CursorKind.FUNCTION_DECL
     """
     fname = f'{source}.{ext}'
     index = clang.cindex.Index.create()
-    tu = index.parse(path=fname, unsaved_files=[(fname, code)])
+    tu = index.parse(path=fname, unsaved_files=[(fname, code)], options=0x01)
     return tu, index
 
 
@@ -28,7 +36,7 @@ class ParsingError(Exception):
     pass
 
 
-def parse_c_expression(expression, include=None, ext='c', source='string') -> Tuple[Cursor, Cursor]:
+def parse_c_expression(expression, include=None, ext='c', source='temporary_buffer_1234') -> Tuple[Cursor, Cursor, TranslationUnit]:
     """Hack the clang parser to parse a single expression
     This is used to parse macros and generate corresponding function when possible
 
@@ -36,7 +44,7 @@ def parse_c_expression(expression, include=None, ext='c', source='string') -> Tu
     --------
 
     >>> from tide.generators.debug import traverse
-    >>> expr, type = parse_c_expression('((Sint8)0x7F)', include='SDL2/SDL.h')
+    >>> expr, type, _ = parse_c_expression('((Sint8)0x7F)', include='SDL2/SDL.h')
     >>> traverse(expr)
     CursorKind.UNEXPOSED_EXPR
      CursorKind.PAREN_EXPR
@@ -49,7 +57,8 @@ def parse_c_expression(expression, include=None, ext='c', source='string') -> Tu
     When the expression is incorrect None is returned
 
     >>> from tide.generators.debug import traverse
-    >>> parse_c_expression('__attribute__((deprecated))', include='SDL2/SDL.h')
+    >>> expr, type, _ = parse_c_expression('__attribute__((deprecated))', include='SDL2/SDL.h')
+    >>> (expr, type)
     (None, None)
     """
     sources = []
@@ -80,11 +89,11 @@ def parse_c_expression(expression, include=None, ext='c', source='string') -> Tu
         children = list(child.get_children())
 
         if len(children) == 0:
-            return None, None
+            return None, None, tu
 
         child = children[0]
 
-    return child, result_type
+    return child, result_type, tu
 
 
 if __name__ == '__main__':

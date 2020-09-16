@@ -59,6 +59,7 @@ bad_attributes = {
     CursorKind.UNARY_OPERATOR: {'tls_kind'},
     CursorKind.BINARY_OPERATOR: {'tls_kind'},
     CursorKind.DECL_REF_EXPR: {'tls_kind'},
+    CursorKind.FLOATING_LITERAL: {'tls_kind'},
 }
 
 
