@@ -735,6 +735,7 @@ class BindingGenerator:
             val = val.replace('u', '')
             val = val.replace('ll', '')
             val = val.replace('U', '')
+            val = val.replace('L', '')
 
             base = 10
             if '0x' in val:
@@ -825,8 +826,8 @@ class BindingGenerator:
         for elem in sorted_children(tu.cursor):
             loc: SourceLocation = elem.location
 
-            # if loc.file is not None and not str(loc.file.name).startswith('/usr/include/SDL2'):
-            #    continue
+            if loc.file is not None and not str(loc.file.name).startswith('/usr/include/SDL2'):
+                continue
 
             try:
                 expr = self.dispatch(elem)
@@ -877,19 +878,21 @@ def generate_bindings():
 
 
 if __name__ == '__main__':
-    from tide.generators.clang_utils import parse_clang
+    generate_bindings()
 
-    tu, index = parse_clang('#define PI 3.14')
-
-    for diag in tu.diagnostics:
-        print(diag.format())
-
-    print(list(tu.cursor.get_children()))
-
-    for i in list(tu.cursor.get_children()):
-        print(i.kind)
-
-    module = BindingGenerator().generate(tu)
-
-    print(unparse(module))
+    # from tide.generators.clang_utils import parse_clang
+    #
+    # tu, index = parse_clang('#define PI 3.14')
+    #
+    # for diag in tu.diagnostics:
+    #     print(diag.format())
+    #
+    # print(list(tu.cursor.get_children()))
+    #
+    # for i in list(tu.cursor.get_children()):
+    #     print(i.kind)
+    #
+    # module = BindingGenerator().generate(tu)
+    #
+    # print(unparse(module))
 
