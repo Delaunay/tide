@@ -1,4 +1,5 @@
 from typing import Tuple
+import re
 
 import clang.cindex
 from clang.cindex import TranslationUnit, Index, CursorKind, Cursor
@@ -36,7 +37,7 @@ class ParsingError(Exception):
     pass
 
 
-def parse_c_expression(expression, include=None, ext='c', source='temporary_buffer_1234') -> Tuple[Cursor, Cursor, TranslationUnit]:
+def parse_c_expression(expression, include=None, ext='c', source='temporary_buffer_1234', header=None) -> Tuple[Cursor, Cursor, TranslationUnit]:
     """Hack the clang parser to parse a single expression
     This is used to parse macros and generate corresponding function when possible
 
@@ -60,47 +61,111 @@ def parse_c_expression(expression, include=None, ext='c', source='temporary_buff
     >>> expr, type, _ = parse_c_expression('__attribute__((deprecated))', include='SDL2/SDL.h')
     >>> (expr, type)
     (None, None)
+
+    This function can only handle very simple expression.
+
+    >>> expr, type, _ = parse_c_expression('((X) * (X))')
+    >>> traverse(expr)
+    None
     """
     sources = []
     if include is not None:
         sources.append(f'#include <{include}>')
 
-    sources.append(f'void fun_023984() {{ auto x_203234234 = {expression}; }}')
+    if header is None:
+        header = ''
+
+    sources.append(f'void fun_023984() {{ {header}; auto x_203234234 = {expression}; }}')
     sources = '\n'.join(sources)
+
     tu, _ = parse_clang(sources, ext=ext, source=source)
+    function = list(tu.cursor.get_children())[-1]
 
-    path = [
-        CursorKind.FUNCTION_DECL,
-        CursorKind.COMPOUND_STMT,
-        CursorKind.DECL_STMT,
-        CursorKind.VAR_DECL
-    ]
+    assert function.kind == CursorKind.FUNCTION_DECL
+    assert function.spelling == 'fun_023984'
 
-    child = list(tu.cursor.get_children())[-1]
-    result_type = None
+    children = list(function.get_children())
+    child = None
 
-    for p in path:
-        assert child.kind == p, f'Expected {child.kind} == {p}'
+    while len(children) > 0:
+        child = children.pop()
 
-        if child.kind == CursorKind.VAR_DECL:
-            assert child.spelling == 'x_203234234'
-            result_type = child.type
+        if child.kind == CursorKind.VAR_DECL and child.spelling == 'x_203234234':
+            break
 
-        children = list(child.get_children())
+        else:
+            for c in child.get_children():
+                children.append(c)
 
-        if len(children) == 0:
-            return None, None, tu
+    if child.spelling != 'x_203234234':
+        return None, None, tu
 
-        child = children[0]
+    result_type = child.type
+    children = list(child.get_children())
 
-    return child, result_type, tu
+    expr = None
+    if len(children) == 1:
+        expr = children[0]
+    else:
+        result_type = None
+
+    return expr, result_type, tu
+
+
+undeclared_identifier_error = \
+    re.compile(r'.*error: use of undeclared identifier \'(?P<identifier>[a-zA-Z_][a-zA-Z0-9_]*)\'')
+
+
+def parse_c_expression_recursive(expression, include=None, ext='c', source='temporary_buffer_1234') -> Tuple[Cursor, Cursor, TranslationUnit]:
+    """Try to automatically fix diagnostic issues.
+    At the moment only the undeclared identifier is automatically fixed
+
+    Examples
+    --------
+    >>> from tide.generators.clang_utils import parse_clang
+    >>> child, result_type, tu = parse_c_expression_recursive('((X) * (X))')
+    >>> traverse(child)
+    CursorKind.PAREN_EXPR
+     CursorKind.BINARY_OPERATOR
+      CursorKind.UNEXPOSED_EXPR
+       CursorKind.PAREN_EXPR
+        CursorKind.DECL_REF_EXPR
+      CursorKind.UNEXPOSED_EXPR
+       CursorKind.PAREN_EXPR
+        CursorKind.DECL_REF_EXPR
+    """
+
+    expr, type, tu = parse_c_expression(expression, include, ext, source)
+    undeclared_identifiers = set()
+
+    for diag in tu.diagnostics:
+        match = undeclared_identifier_error.match(diag.format())
+
+        if match is not None:
+            undeclared_identifiers.add(match.groupdict()['identifier'])
+
+    src = []
+    for i in undeclared_identifiers:
+        src.append(f'auto {i};')
+
+    head = '\n'.join(src)
+    return parse_c_expression(expression, include, ext, source, head)
 
 
 if __name__ == '__main__':
-    expr, type = parse_c_expression('((Sint8)0x7F)', include='SDL2/SDL.h')
+    child, result_type, tu = parse_c_expression_recursive('((X) * (X))')
 
-    traverse(expr)
-    traverse(type)
+    for diag in tu.diagnostics:
+        print(diag.format())
+
+    traverse(child)
+    traverse(result_type)
+
+
+    # expr, type = parse_c_expression('((Sint8)0x7F)', include='SDL2/SDL.h')
+    #
+    # traverse(expr)
+    # traverse(type)
 
 
 

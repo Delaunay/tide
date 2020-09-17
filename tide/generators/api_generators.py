@@ -1,7 +1,6 @@
 import clang.cindex
 from clang.cindex import Cursor, CursorKind, Type, SourceLocation, TypeKind, TranslationUnit
 
-from tide.generators.binding_generator import sorted_children
 import tide.generators.nodes as T
 from tide.utils.trie import Trie
 from tide.generators.debug import show_elem
@@ -516,8 +515,10 @@ class APIGenerator:
         log.debug(f'including f{elem.spelling}')
 
     def generate(self, tu):
+        from tide.generators.binding_generator import sorted_children
+
         elem: Cursor
-        for elem in sorted_children(None, tu.cursor):
+        for elem in sorted_children(tu.cursor):
             loc: SourceLocation = elem.location
 
             self.module = self.modules.get(loc.file.name, T.Module(body=[]))

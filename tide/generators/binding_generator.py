@@ -2,7 +2,7 @@ import clang.cindex
 from clang.cindex import Cursor, CursorKind, Type, SourceLocation, TypeKind
 
 from tide.generators.api_generators import get_comment, type_mapping
-from tide.generators.clang_utils import parse_c_expression
+from tide.generators.clang_utils import parse_c_expression_recursive
 from tide.generators.debug import show_elem, traverse
 import tide.generators.nodes as T
 import ctypes
@@ -125,8 +125,12 @@ def sorted_children(cursor):
     return merged
 
 
-class APIGenerator:
-    """Generate C to python bindings given library headers"""
+class BindingGenerator:
+    """Generate C to python bindings given library headers
+    This generate a verbatim translation of the library the result is far from pythonic
+
+    The API generator pass can later be applied to the result to generate a more organized version
+    """
 
     def __init__(self):
         self.type_registry = type_mapping()
@@ -179,7 +183,7 @@ class APIGenerator:
         --------
         >>> from tide.generators.clang_utils import parse_clang
         >>> tu, index = parse_clang('typedef int int32;')
-        >>> module = APIGenerator().generate(tu)
+        >>> module = BindingGenerator().generate(tu)
         >>> print(compact(unparse(module)))
         <BLANKLINE>
         int32 = c_int
@@ -307,7 +311,7 @@ class APIGenerator:
         --------
         >>> from tide.generators.clang_utils import parse_clang
         >>> tu, index = parse_clang('float add(float a, float b);')
-        >>> module = APIGenerator().generate(tu)
+        >>> module = BindingGenerator().generate(tu)
         >>> print(compact(unparse(module)))
         <BLANKLINE>
         add = _bind('add', [c_float, c_float], c_float)
@@ -444,7 +448,7 @@ class APIGenerator:
         --------
         >>> from tide.generators.clang_utils import parse_clang
         >>> tu, index = parse_clang('struct Point { float x, y;};')
-        >>> module = APIGenerator().generate(tu)
+        >>> module = BindingGenerator().generate(tu)
         >>> print(compact(unparse(module)))
         <BLANKLINE>
         class Point(Structure):
@@ -456,7 +460,7 @@ class APIGenerator:
 
         >>> from tide.generators.clang_utils import parse_clang
         >>> tu, index = parse_clang('union Point { float x; int y;};')
-        >>> module = APIGenerator().generate(tu)
+        >>> module = BindingGenerator().generate(tu)
         >>> print(compact(unparse(module)))
         <BLANKLINE>
         class Point(Union):
@@ -507,7 +511,7 @@ class APIGenerator:
         --------
         >>> from tide.generators.clang_utils import parse_clang
         >>> tu, index = parse_clang('enum Colors { Red, Green, Blue;};')
-        >>> module = APIGenerator().generate(tu)
+        >>> module = BindingGenerator().generate(tu)
         >>> print(compact(unparse(module)))
         <BLANKLINE>
         Colors = c_int
@@ -578,12 +582,29 @@ class APIGenerator:
         --------
         >>> from tide.generators.clang_utils import parse_clang
         >>> tu, index = parse_clang('#define PI 3.14')
-        >>> module = APIGenerator().generate(tu)
+        >>> module = BindingGenerator().generate(tu)
         >>> print(compact(unparse(module)))
         <BLANKLINE>
         PI = 3.14
         <BLANKLINE>
 
+        >>> tu, index = parse_clang(''
+        ... '#define SDL_AUDIO_ALLOW_FREQUENCY_CHANGE    0x00000001\\n'
+        ... '#define SDL_AUDIO_ALLOW_FORMAT_CHANGE       0x00000002\\n'
+        ... '#define SDL_AUDIO_ALLOW_CHANNELS_CHANGE     0x00000004\\n'
+        ... '#define SDL_AUDIO_ALLOW_ANY_CHANGE          (SDL_AUDIO_ALLOW_FREQUENCY_CHANGE|SDL_AUDIO_ALLOW_FORMAT_CHANGE|SDL_AUDIO_ALLOW_CHANNELS_CHANGE)\\n'
+        ... )
+        >>> module = BindingGenerator().generate(tu)
+        >>> print(compact(unparse(module)))
+        <BLANKLINE>
+        SDL_AUDIO_ALLOW_FREQUENCY_CHANGE = 1
+        <BLANKLINE>
+        SDL_AUDIO_ALLOW_FORMAT_CHANGE = 2
+        <BLANKLINE>
+        SDL_AUDIO_ALLOW_CHANNELS_CHANGE = 4
+        <BLANKLINE>
+        SDL_AUDIO_ALLOW_ANY_CHANGE = ((SDL_AUDIO_ALLOW_FREQUENCY_CHANGE | SDL_AUDIO_ALLOW_FORMAT_CHANGE) | SDL_AUDIO_ALLOW_CHANNELS_CHANGE)
+        <BLANKLINE>
         """
         # builtin macros
         if elem.location.file is None:
@@ -652,7 +673,7 @@ class APIGenerator:
         if include == 'temporary_buffer_1234.c':
             include = None
 
-        expr, type, tu = parse_c_expression(c_expr, include=include)
+        expr, type, tu = parse_c_expression_recursive(c_expr, include=include)
 
         for diag in tu.diagnostics:
             log.debug(diag.format())
@@ -801,7 +822,7 @@ class APIGenerator:
         module.body = []
 
         elem: Cursor
-        for elem in self.sorted_children(tu.cursor):
+        for elem in sorted_children(tu.cursor):
             loc: SourceLocation = elem.location
 
             # if loc.file is not None and not str(loc.file.name).startswith('/usr/include/SDL2'):
@@ -837,7 +858,7 @@ def generate_bindings():
     for diag in tu.diagnostics:
         print(diag.format())
 
-    gen = APIGenerator()
+    gen = BindingGenerator()
     module = gen.generate(tu)
 
     print('=' * 80)
@@ -868,7 +889,7 @@ if __name__ == '__main__':
     for i in list(tu.cursor.get_children()):
         print(i.kind)
 
-    module = APIGenerator().generate(tu)
+    module = BindingGenerator().generate(tu)
 
     print(unparse(module))
 
