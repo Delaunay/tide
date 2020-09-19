@@ -439,10 +439,10 @@ class Continue(Statement):
 class BoolOp(Expression):
     op: 'BoolOp'
     values: ListT[Expression]
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
 
 
 #  expr Constructor(NamedExpr, [Field(expr, target), Field(expr, value)])
@@ -608,12 +608,12 @@ class YieldFrom(Expression):
 @dataclass
 class Compare(Expression):
     left: Expression
-    ops: 'Compare'
+    ops: ListT['Compare']
     comparators: ListT[Expression]
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
 
 
 #  expr Constructor(Call, [Field(expr, func), Field(expr, args, seq=True), Field(keyword, keywords, seq=True)])

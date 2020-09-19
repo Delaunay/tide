@@ -65,7 +65,14 @@ bad_attributes = {
 
 
 def d(depth=0):
-    s = '|:' * depth
+    s = []
+    for i in range(depth):
+        if i % 2 == 0:
+            s.append('|')
+        else:
+            s.append(':')
+
+    s = ''.join(s)
     return s + '+-> '
 
 
@@ -140,4 +147,17 @@ def show_file(filename):
 
 
 if __name__ == '__main__':
-    show_file('/usr/include/SDL2/SDL.h')
+    # show_file('/usr/include/SDL2/SDL.h')
+
+    import ast
+    from astunparse import unparse, dump
+
+    mod = ast.parse("""
+a = 1
+
+if a and 2:
+    pass
+""")
+
+    print(dump(mod))
+    print(unparse(mod))

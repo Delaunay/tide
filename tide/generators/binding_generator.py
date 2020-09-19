@@ -96,7 +96,7 @@ def parse_macro(tokens):
     args = []
 
     i = 0
-    if tokens[1].spelling == '(':
+    if len(tokens) > 1 and tokens[1].spelling == '(':
         if tokens[2].spelling == ')':
             return name, [], list(tokens[3:])
 
@@ -132,7 +132,7 @@ def parse_macro(tokens):
     return name, args, body
 
 
-def parse_macro2(name, args, body: List[Token]):
+def parse_macro2(name, args, body: List[Token], definitions=None):
     # there is a shit load of token kind
     # https://github.com/llvm/llvm-project/blob/master/clang/include/clang/Basic/TokenKinds.def
 
@@ -140,7 +140,7 @@ def parse_macro2(name, args, body: List[Token]):
     for b in body:
         log.debug(f'{b.kind} {b.spelling}')
 
-    parser = TokenParser(body)
+    parser = TokenParser(body, definitions)
     expr = parser.parse_expression()
 
     print(expr)
@@ -156,10 +156,14 @@ def sorted_children(cursor):
     This also allow us to group Macro and their definitions.
     For example is is often the case that function definition have additional attributes prepended through macros.
     """
+    def is_builtin(elem):
+        return elem.location.file is None
+
     def is_not_builtin(elem):
-        return elem.location.file is not None
+        return not is_builtin(elem)
 
     elements = list(filter(is_not_builtin, cursor.get_children()))
+    builtin = list(filter(is_builtin, cursor.get_children()))
 
     def is_macro(elem):
         return elem.kind in (CursorKind.MACRO_DEFINITION, CursorKind.MACRO_INSTANTIATION, CursorKind.INCLUSION_DIRECTIVE)
@@ -221,7 +225,7 @@ def sorted_children(cursor):
             raise RuntimeError()
 
     assert len(merged) == len(elements)
-    return merged
+    return merged, builtin
 
 
 class BindingGenerator:
@@ -233,6 +237,13 @@ class BindingGenerator:
 
     def __init__(self):
         self.type_registry = type_mapping()
+        # keep track of all the macros we cannot support
+        # so other macros using those will be me ignored as well
+        self.unsupported_macros = set()
+        # definition are macro/value defined at compile time
+        # those definition in particular are Compiler builtin
+        # this is so we can do our own macro expansion when required
+        self.definitions = dict()
         self.dispatcher = {
             # Declarations
             CursorKind.FUNCTION_DECL: self.generate_function,
@@ -740,66 +751,41 @@ class BindingGenerator:
         # note that this is guessing as clang does not provide a way to identify
         # the arguments from the body
         name, tok_args, tok_body = parse_macro(tokens)
-
         try:
-            py_body = parse_macro2(name, tok_args, tok_body)
+            bods = {t.spelling for t in tok_body}
+            if not bods.isdisjoint(self.unsupported_macros):
+                raise UnsupportedExpression()
+
+            py_body = parse_macro2(name, tok_args, tok_body, self.definitions)
 
         except UnsupportedExpression:
+            self.unsupported_macros.add(name.spelling)
             body = [b.spelling for b in tok_body]
             log.warning(f'Unsupported expression, cannot transform macro {name} {"".join(body)}')
             return
 
-        if len(args) == 0:
+        name = name.spelling
+        if len(tok_args) == 0 and not isinstance(py_body, T.If):
             return T.Assign([T.Name(name)], py_body)
 
-        func = T.FunctionDef(name, T.Arguments(args=[T.Arg(arg=a.spelling) for a in tok_args]))
-        func.body = [
-            T.Return(py_body)
-        ]
+        func = T.FunctionDef(
+            name,
+            T.Arguments(args=[T.Arg(arg=a.spelling) for a in tok_args])
+        )
+
+        if isinstance(py_body, T.Expr):
+            py_body = py_body.value
+
+        # we use ifs as a makeshift Body expression
+        if isinstance(py_body, T.If) and isinstance(py_body.test, T.Constant) \
+                and py_body.test.value is True:
+            func.body = py_body.body
+        else:
+            func.body = [
+                T.Return(py_body)
+            ]
+
         return func
-
-        #
-        # args = [b.spelling for b in tok_args]
-        #
-        # macro_def = MacroDefinition(name, args, body)
-        # expr, type, _ = parse_c_expression_recursive(name, include=include)
-        #
-        # # macro lookup did not work and it just got resolve to itself
-        # if expr is not None and expr.spelling == name:
-        #     traverse(expr, print_fun=log.debug)
-        #     expr = None
-        #
-        # if expr is None:
-        #     # Try to make clang parse the expression so we can generate code for it
-        #     log.debug(tokens)
-        #     c_expr = ''.join(body)
-        #
-        #     expr, type, tu = parse_c_expression_recursive(c_expr, include=include)
-        #
-        #     for diag in tu.diagnostics:
-        #         log.debug(diag.format())
-        #
-        #     log.debug(f'{c_expr}, {expr}, {type}')
-        #
-        # # expr is not which means we were not able to parse it
-        # # Example: __attribute__((deprecated))
-        # if expr is None:
-        #     log.warning(f'Ignoring macro {name} because it was not convertible')
-        #     return
-        #
-        # # done
-        # py_expr = self.dispatch(expr, macro_def=macro_def, **kwargs)
-        #
-        # py_type = None
-        # if type is not None:
-        #     py_type = self.generate_type(type, **kwargs)
-        #
-        # if py_expr is None:
-        #     traverse(expr, print_fun=log.debug)
-        #     traverse(type, print_fun=log.debug)
-        #
-        # assert py_expr is not None
-
 
     def generate_c_cast(self, elem, **kwargs):
         show_elem(elem)
@@ -941,13 +927,46 @@ class BindingGenerator:
 
         return fun(elem, depth=depth + 1, **kwargs)
 
+    def process_builtin_macros(self, cursor: Cursor):
+        tokens = list(cursor.get_tokens())
+        name, tok_args, tok_body = parse_macro(tokens)
+
+        if len(tok_body) == 0:
+            self.definitions[name.spelling] = T.Constant(True)
+            return
+
+        try:
+            bods = {t.spelling for t in tok_body}
+            if not bods.isdisjoint(self.unsupported_macros):
+                raise UnsupportedExpression()
+
+            py_body = parse_macro2(name, tok_args, tok_body)
+
+        except UnsupportedExpression:
+            self.unsupported_macros.add(name.spelling)
+
+        self.definitions[name.spelling] = py_body
+
     def generate(self, tu, guard=None):
         module: T.Module = Module()
         module.body = []
 
-        children = sorted_children(tu.cursor)
-        log.debug(f'Processing {len(children)} children')
+        children, builtin = sorted_children(tu.cursor)
 
+        assert len(builtin) > 0
+        # Process every builtin macros
+        for b in builtin:
+            print(b.kind)
+            if b.kind == CursorKind.MACRO_DEFINITION:
+                self.process_builtin_macros(b)
+
+        for k, v in self.definitions.items():
+            print(k, v)
+
+        # __BYTE_ORDER__ is defined by clang, __BYTE_ORDER is defined by other includes
+        self.definitions['__BYTE_ORDER'] = self.definitions['__BYTE_ORDER__']
+
+        log.debug(f'Processing {len(children)} children')
         elem: Cursor
         for elem in children:
             loc: SourceLocation = elem.location
