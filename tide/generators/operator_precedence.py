@@ -7,6 +7,7 @@ from tide.generators.debug import show_elem, d
 
 
 log = logging.getLogger(__name__)
+log.setLevel(logging.DEBUG)
 
 LeftToRight = 1
 RightToLeft = 2
@@ -159,8 +160,11 @@ class TokenParser:
     SDL_AUDIO_ALLOW_ANY_CHANGE = (SDL_AUDIO_ALLOW_FREQUENCY_CHANGE | (SDL_AUDIO_ALLOW_FORMAT_CHANGE | SDL_AUDIO_ALLOW_CHANNELS_CHANGE))
     <BLANKLINE>
 
+    Issues
+    ------
+    c-style cast have the wrong precedence
     """
-    def __init__(self, tokens, definitions):
+    def __init__(self, tokens, definitions, registry):
         self.tokens = tokens
         # for tok in tokens:
         #     if tok.spelling != '\\':
@@ -169,9 +173,13 @@ class TokenParser:
         if definitions is None:
             definitions = dict()
 
+        if registry is None:
+            registry = dict()
+
         self.pos = 0
         self.is_call = [False]
         self.definitions = definitions
+        self.registry = registry
 
         # there is a shit load of token kind
         # https://github.com/llvm/llvm-project/blob/master/clang/include/clang/Basic/TokenKinds.def
@@ -196,11 +204,13 @@ class TokenParser:
 
     def parse_unary(self, depth):
         tok = self.peek()
-        log.debug(f'{d(depth)} parse_expression {tok.kind} {tok.spelling}')
+        log.debug(f'{d(depth)} parse_unary {tok.kind} {tok.spelling}')
 
         op = tok
         self.next()
         expr = self.parse_expression(depth + 1)
+
+        print(expr)
 
         # dereference
         if op.spelling == '&':
@@ -241,20 +251,25 @@ class TokenParser:
         if tok is None:
             return p
 
-        if not is_operator(tok.spelling):
-            return p
-
         # we are doing a cast or call (type(expr))
         if tok.spelling == '(':
             self.next()
             expr = self.parse_call(p, depth + 1)
-            assert self.peek().spelling == ')'
-            self.next()
+
+            if self.peek().spelling == ')':
+                self.next()
             return expr
 
         # argument list do not try to parse operators
         if tok.spelling == ',' and self.is_call[-1]:
            return p
+
+        if tok.spelling == ')':
+            return p
+
+        # cast (expr) <expr>
+        if not is_operator(tok.spelling):
+            return self.parse_cast(p, depth + 1)
 
         # if tok.spelling == ')':
         #    return p
@@ -262,6 +277,9 @@ class TokenParser:
         return self.parse_expression_1(p, 0, depth + 1)
 
     def parse_cast(self, cast_expr, depth):
+        tok = self.peek()
+        log.debug(f'{d(depth)} parse_cast {tok.kind} {tok.spelling}')
+
         expr = self.parse_expression(depth + 1)
         return T.Call(cast_expr, [expr])
 
@@ -269,14 +287,24 @@ class TokenParser:
         tok = self.peek()
         log.debug(f'{d(depth)} parse_primary {tok.kind} {tok.spelling}')
 
+        # this can be a cast or a call
+        # cast means that lhs is a type
         if tok.spelling == '(':
             self.next()
             expr = self.parse_expression(depth + 1)
             tok = self.peek()
 
-            # we are doing a cast
-            # (()  expr)
-            if tok and tok.spelling != ')':
+            # lhs is a type
+            if isinstance(expr, T.Name) and expr.id in self.registry:
+                if tok.spelling == ')':
+                    self.next()
+
+                expr = self.parse_cast(expr, depth + 1)
+
+            elif tok and is_operator(tok.spelling):
+                return self.parse_expression_1(expr, 0, depth=depth + 1)
+
+            elif tok and tok.spelling != ')':
                 expr = self.parse_cast(expr, depth + 1)
 
             tok = self.peek()
@@ -335,14 +363,29 @@ class TokenParser:
             raise UnsupportedExpression()
 
         nexttok = self.peek()
+
+        # if
+        name = tok.spelling
+        if nexttok and nexttok.spelling == '*':
+            self.next()
+            name = f'{tok.spelling} *'
+
+        if name in self.registry:
+            name = self.registry[name]
+        else:
+            name = T.Name(name)
+
+        # try to find a cast
+        nexttok = self.peek()
+        if nexttok and name in self.registry:
+            return self.parse_cast(name, depth + 1)
+
         if nexttok and nexttok.spelling == '(':
             self.next()
-            return self.parse_call(T.Name(tok.spelling), depth + 1)
+            return self.parse_call(name, depth + 1)
 
-        if nexttok and nexttok.spelling == '*':
-            # FIXME: we ignore `*`
-            # void*
-            self.next()
+        if tok.spelling in self.registry:
+            return self.registry[tok.spelling]
 
         return T.Name(tok.spelling)
 
@@ -440,8 +483,6 @@ class TokenParser:
 
                 if lookahead.spelling == ')':
                     break
-
-            import ast
 
             # the result of applying op with operands lhs and rhs
             pyop = fetch_python_op(op.spelling)

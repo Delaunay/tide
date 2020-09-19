@@ -148,8 +148,8 @@ def parse_macro(tokens):
     return name, args, body
 
 
-def parse_macro2(name, args, body: List[Token], definitions=None):
-    parser = TokenParser(body, definitions)
+def parse_macro2(name, args, body: List[Token], definitions=None, registry=None):
+    parser = TokenParser(body, definitions, registry)
     expr = parser.parse_expression()
 
     return expr
@@ -757,12 +757,15 @@ class BindingGenerator:
         if len(tok_body) == 0:
             return
 
+        if name.spelling == 'NULL':
+            return None
+
         try:
             bods = {t.spelling for t in tok_body}
             if not bods.isdisjoint(self.unsupported_macros):
                 raise UnsupportedExpression()
 
-            py_body = parse_macro2(name, tok_args, tok_body, self.definitions)
+            py_body = parse_macro2(name, tok_args, tok_body, self.definitions, self.type_registry)
 
         except UnsupportedExpression:
             self.unsupported_macros.add(name.spelling)
@@ -771,6 +774,11 @@ class BindingGenerator:
             return
 
         name = name.spelling
+
+        # if name == 'SDL_TOUCH_MOUSEID':
+        #     print(py_body)
+        #     assert False
+
         if len(tok_args) == 0 and not isinstance(py_body, T.If):
             return T.Assign([T.Name(name)], py_body)
 
@@ -1021,7 +1029,7 @@ def generate_bindings():
         f.write("""import os\n""")
         f.write("""from ctypes import *\n""")
         f.write("""from tide.runtime.loader import DLL\n""")
-        f.write("""import tide.runtime.ctypes_ext\n""")
+        f.write("""from tide.runtime.ctypes_ext import *\n""")
         f.write("""_lib = DLL("SDL2", ["SDL2", "SDL2-2.0"], os.getenv("PYSDL2_DLL_PATH"))\n""")
         f.write("""_bind = _lib.bind_function\n""")
         f.write(unparse(module))

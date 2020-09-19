@@ -58,6 +58,7 @@ def type_mapping():
         'int64_t': T.Name('c_int64'),
         'uint64_t': T.Name('c_uint64'),
         'void *': T.Name('c_void_p'),
+        'size_t': T.Name('c_uint64'),
         'FILE *': T.Name('c_void_p'),
     }
 
