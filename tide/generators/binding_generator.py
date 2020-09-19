@@ -5,7 +5,9 @@ from tide.generators.api_generators import get_comment, type_mapping
 from tide.generators.clang_utils import parse_c_expression_recursive
 from tide.generators.debug import show_elem, traverse
 import tide.generators.nodes as T
-import ctypes
+
+from dataclasses import dataclass
+from typing import List
 
 import ast
 from ast import Module
@@ -19,6 +21,82 @@ import re
 empty_line = re.compile(r'^\s*$', re.MULTILINE)
 c_identifier = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
 log = logging.getLogger('TIDE')
+
+
+LeftToRight = 1
+RightToLeft = 2
+Unary = 1
+Binary = 2
+
+operator = {
+    (LeftToRight, '++'): (1, 'Suffix increment', Unary),
+    (LeftToRight, '--'): (1, 'Suffix decrement', Unary),
+    (LeftToRight, '(' ): (1, 'Function call'),       # (LeftToRight, ')' ): 1,
+    (LeftToRight, '[' ): (1, 'Array subscripting'),  # (LeftToRight, ']' ): 1,
+    (LeftToRight, '.' ): (1, 'member access ', Binary),
+    (LeftToRight, '->'): (1, 'member access through pointer', Binary),
+
+    (RightToLeft, '++'): (2, 'Prefix increment', Unary),
+    (RightToLeft, '--'): (2, 'Prefix decrement', Unary),
+    (RightToLeft,  '+'): (2, 'Unary +', Binary),
+    (RightToLeft,  '-'): (2, 'Unary -', Binary),
+    (RightToLeft,  '!'): (2, 'Logical NOT', Unary),
+    (RightToLeft,  '~'): (2, 'bitwise NOT', Unary),
+    (RightToLeft,  '('): (2, 'Cast', Unary),
+    (RightToLeft,  '*'): (2, 'Indirection', Unary),
+    (RightToLeft,  '&'): (2, 'Address-of', Unary),
+    (RightToLeft, 'sizeof'): (2, 'Size-of'),
+    (RightToLeft, '_Alignof'): (2, 'Alignment requirement'),
+
+    (LeftToRight, '*'): (3, 'Multiplication', Binary),
+    (LeftToRight, '%'): (3, 'Remainder', Binary),
+    (LeftToRight, '/'): (3, 'Division', Binary),
+
+    (LeftToRight, '+'): (4, 'Add', Binary),
+    (LeftToRight, '-'): (4, 'Sub', Binary),
+
+    (LeftToRight, '<<'): (5, 'Bitwise left shift', Binary),
+    (LeftToRight, '>>'): (5, 'Bitwise right shift', Binary),
+
+    (LeftToRight, '<'): (6, 'lt', Binary),
+    (LeftToRight, '>'): (6, 'gt', Binary),
+    (LeftToRight, '<='): (6, 'lte', Binary),
+    (LeftToRight, '>='): (6, 'gte', Binary),
+
+    (LeftToRight, '=='): (7, 'Equal', Binary),
+    (LeftToRight, '!='): (7, 'Not Equal', Binary),
+
+    (LeftToRight, '&'): (8, 'Bitwise AND', Binary),
+    (LeftToRight, '^'): (9, 'Bitwise XOR', Binary),
+    (LeftToRight, '|'): (10, 'Bitwise OR', Binary),
+    (LeftToRight, '&&'): (11, 'Logical AND', Binary),
+    (LeftToRight, '||'): (12, 'Logical OR', Binary),
+
+    (RightToLeft, '?'): (13, 'Ternary conditional', Binary),
+
+    (RightToLeft, '='  ): (14, '', Binary),
+    (RightToLeft, '+=' ): (14, '', Binary),
+    (RightToLeft, '-=' ): (14, '', Binary),
+    (RightToLeft, '*=' ): (14, '', Binary),
+    (RightToLeft, '/=' ): (14, '', Binary),
+    (RightToLeft, '%=' ): (14, '', Binary),
+    (RightToLeft, '<<='): (14, '', Binary),
+    (RightToLeft, '>>='): (14, '', Binary),
+    (RightToLeft, '&=' ): (14, '', Binary),
+    (RightToLeft, '^=' ): (14, '', Binary),
+    (RightToLeft, '|=' ): (14, '', Binary),
+
+    (LeftToRight, ','): (15, 'Comma', Binary),
+}
+
+ops = {k for (_, k) in operator}
+
+
+@dataclass
+class MacroDefinition:
+    name: str
+    args: List[str]
+    tokens: List[str]
 
 
 def is_valid(name):
@@ -46,6 +124,41 @@ def compact(string):
 
 class Unsupported(Exception):
     pass
+
+
+# it is hard to know if we have a `callable` macro or not
+# in C/C++ the difference is a space between the defined name and the parenthesis
+# but Clang erase all superfluous space so we cannot know right away
+def parse_macro(tokens):
+    name = tokens[0]
+    args = []
+
+    i = 0
+    if tokens[1] == '(':
+        i = 2
+        tok = tokens[i]
+        while tok != ')':
+            if tok != ',':
+                # argument is not an identifier
+                if re.match(c_identifier, tok) is not None:
+                    args.append(tok)
+                else:
+                    return name, [], tokens[1:]
+
+            i += 1
+            tok = tokens[i]
+
+    # arguments should be used in the body
+    # else we think it is a macro without arg
+    body = tokens[i + 1:]
+    for arg in reversed(args):
+        if not arg in body:
+            return name, [], tokens[1:]
+
+    if len(args) == 0:
+        return name, [], tokens[1:]
+
+    return name, args, body
 
 
 def sorted_children(cursor):
@@ -165,18 +278,18 @@ class BindingGenerator:
             CursorKind.MACRO_DEFINITION: self.generate_macro_definition,
         }
 
-    def generate_var_decl(self, elem):
+    def generate_var_decl(self, elem, **kwargs):
         return T.AnnAssign(T.Name(elem.spelling), self.generate_type(elem.type), None)
 
-    def ignore(self, elem):
+    def ignore(self, elem, **kwargs):
         children = list(elem.get_children())
         assert len(children) == 1
-        return self.dispatch(children[0])
+        return self.dispatch(children[0], **kwargs)
 
-    def generate_typeref(self, elem):
+    def generate_typeref(self, elem, **kwargs):
         return T.Name(elem.spelling)
 
-    def generate_typedef(self, elem):
+    def generate_typedef(self, elem, **kwargs):
         """Generate a type alias
 
         Examples
@@ -230,6 +343,9 @@ class BindingGenerator:
         # print(type.kind, type.spelling, self.type_registry.get(type.spelling, 'NOT FOUND'))
         if type.kind == TypeKind.VOID:
             return T.Name('None')
+
+        if type.kind == TypeKind.INT:
+            return T.Name('c_int')
 
         if type.kind == TypeKind.POINTER and type.get_pointee().kind == TypeKind.VOID:
             return T.Name('c_void_p')
@@ -301,10 +417,10 @@ class BindingGenerator:
             return get_typename(type)
 
         # print('gentype')
-        show_elem(type)
+        show_elem(type, print_fun=log.debug)
         return get_typename(type)
 
-    def generate_function(self, elem: Cursor, depth=0):
+    def generate_function(self, elem: Cursor, depth=0, **kwargs):
         """Generate a type alias
 
         Examples
@@ -399,7 +515,7 @@ class BindingGenerator:
 
         return type.get_declaration().get_usr()
 
-    def generate_field(self, body, attrs, attr, anonymous_renamed, depth):
+    def generate_field(self, body, attrs, attr, anonymous_renamed, depth, **kwargs):
         if attr.kind == CursorKind.FIELD_DECL:
             # Rename anonymous types
             uid = self.get_underlying_type_uid(attr.type)
@@ -441,7 +557,7 @@ class BindingGenerator:
             print('NESTED ', attr.kind)
             raise RuntimeError('')
 
-    def generate_struct_union(self, elem: Cursor, depth=1, nested=False, rename=None):
+    def generate_struct_union(self, elem: Cursor, depth=1, nested=False, rename=None, **kwargs):
         """Generate a struct or union alias
 
         Examples
@@ -504,7 +620,7 @@ class BindingGenerator:
         fields = T.Assign([T.Attribute(T.Name(pyname), '_fields_')], attrs)
         return [T.ClassDef(name=pyname, bases=[T.Name(base)], body=body), fields]
 
-    def generate_enum(self, elem: Cursor, depth=0):
+    def generate_enum(self, elem: Cursor, depth=0, **kwargs):
         """ Generate a enum
 
         Examples
@@ -542,10 +658,10 @@ class BindingGenerator:
 
         return enum
 
-    def generate_include(self, elem: Cursor):
+    def generate_include(self, elem: Cursor, **kwargs):
         log.debug(f'including f{elem.spelling}')
 
-    def generate_macro_instantiation(self, elem: Cursor):
+    def generate_macro_instantiation(self, elem: Cursor, **kwargs):
         macro_definition = elem.get_definition()
         if macro_definition is not None and macro_definition.location.file is None:
             return
@@ -575,7 +691,7 @@ class BindingGenerator:
         if x.isalnum():
             return True
 
-    def generate_macro_definition(self, elem: Cursor):
+    def generate_macro_definition(self, elem: Cursor, **kwargs):
         """Transform a macro into a function if possible
 
         Examples
@@ -618,12 +734,12 @@ class BindingGenerator:
 
         if len(args) != 0:
             for arg in args:
-                show_elem(arg)
+                show_elem(arg, print_fun=log.debug)
                 assert False
 
         if len(children) != 0:
             for child in children:
-                show_elem(child)
+                show_elem(child, print_fun=log.debug)
                 assert False
 
         raw_tokens = [t.spelling for t in tokens]
@@ -631,54 +747,31 @@ class BindingGenerator:
         if len(raw_tokens) == 1:
             return
 
-        # it is hard to know if we have a `callable` macro or not
-        # in C/C++ the difference is a space between the defined name and the parenthesis
-        # but Clang erase all superfluous space so we cannot know right away
-        def parse_macro(tokens):
-            name = tokens[0]
-            args = []
-
-            i = 0
-            if tokens[1] == '(':
-                i = 2
-                tok = tokens[i]
-                while tok != ')':
-                    if tok != ',':
-                        # argument is not an identifier
-                        if re.match(c_identifier, tok) is not None:
-                            args.append(tok)
-                        else:
-                            return name, [], tokens[1:]
-
-                    i += 1
-                    tok = tokens[i]
-
-            # arguments should be used in the body
-            # else we think it is a macro without arg
-            body = tokens[i + 1:]
-            for arg in reversed(args):
-                if not arg in body:
-                    return name, [], tokens[1:]
-
-            if len(args) == 0:
-                return name, [], tokens[1:]
-
-            return name, args, body
-
-        name, args, body = parse_macro(raw_tokens)
-        log.debug(raw_tokens)
-
-        c_expr = ''.join(body)
         include = elem.location.file.name
         if include == 'temporary_buffer_1234.c':
             include = None
 
-        expr, type, tu = parse_c_expression_recursive(c_expr, include=include)
+        # Try to fetch the value of the macro after instantiation
+        name, args, body = parse_macro(raw_tokens)
+        macro_def = MacroDefinition(name, args, body)
+        expr, type, _ = parse_c_expression_recursive(name, include=include)
 
-        for diag in tu.diagnostics:
-            log.debug(diag.format())
+        # macro lookup did not work and it just got resolve to itself
+        if expr is not None and expr.spelling == name:
+            traverse(expr, print_fun=log.debug)
+            expr = None
 
-        log.debug(f'{c_expr}, {expr}, {type}')
+        if expr is None:
+            # Try to make clang parse the expression so we can generate code for it
+            log.debug(raw_tokens)
+            c_expr = ''.join(body)
+
+            expr, type, tu = parse_c_expression_recursive(c_expr, include=include)
+
+            for diag in tu.diagnostics:
+                log.debug(diag.format())
+
+            log.debug(f'{c_expr}, {expr}, {type}')
 
         # expr is not which means we were not able to parse it
         # Example: __attribute__((deprecated))
@@ -687,11 +780,15 @@ class BindingGenerator:
             return
 
         # done
-        py_expr = self.dispatch(expr)
+        py_expr = self.dispatch(expr, macro_def=macro_def, **kwargs)
+
+        py_type = None
+        if type is not None:
+            py_type = self.generate_type(type, **kwargs)
 
         if py_expr is None:
-            traverse(expr)
-            traverse(type)
+            traverse(expr, print_fun=log.debug)
+            traverse(type, print_fun=log.debug)
 
         assert py_expr is not None
 
@@ -699,6 +796,9 @@ class BindingGenerator:
             value = py_expr
             if len(body) == 0:
                 value = T.Str(name)
+
+            if py_type is not None:
+                return T.AnnAssign(T.Name(name), py_type, value)
 
             return T.Assign([T.Name(name)], value)
 
@@ -708,27 +808,27 @@ class BindingGenerator:
         ]
         return func
 
-    def generate_c_cast(self, elem):
+    def generate_c_cast(self, elem, **kwargs):
         show_elem(elem)
         children = list(elem.get_children())
 
         if len(children) == 2:
             type, expr = children
-            traverse(type)
-            traverse(expr)
+            traverse(type, print_fun=log.debug)
+            traverse(expr, print_fun=log.debug)
 
-            typecast = self.dispatch(type)
+            typecast = self.dispatch(type, **kwargs)
             if isinstance(typecast, str):
                 typecast = T.Name(typecast)
 
-            return T.Call(typecast, [self.dispatch(expr)])
+            return T.Call(typecast, [self.dispatch(expr, **kwargs)])
 
         if len(children) == 1:
-            return self.dispatch(children[0])
+            return self.dispatch(children[0], **kwargs)
 
         return None
 
-    def generate_integer(self, elem: Cursor):
+    def generate_integer(self, elem: Cursor, **kwargs):
         try:
             val = list(elem.get_tokens())[0].spelling
 
@@ -748,61 +848,85 @@ class BindingGenerator:
             # but we cannot really do that in python I think
             return T.Constant(int(elem.location.line))
 
-    def generate_string(self, elem):
+    def generate_string(self, elem, **kwargs):
         return T.Constant(elem.spelling)
 
-    def generate_float(self, elem):
+    def generate_float(self, elem, **kwargs):
         toks = [t.spelling for t in elem.get_tokens()]
         assert len(toks) == 1
         return T.Constant(float(toks[0]))
 
-    def generate_unary_operator(self, elem):
+    def generate_unary_operator(self, elem, macro_def: MacroDefinition = None, **kwargs):
         expr = list(elem.get_children())
         assert len(expr) == 1
 
-        expr = self.dispatch(expr[0])
-        op_tok = [t.spelling for t in elem.get_tokens()][0]
+        expr = self.dispatch(expr[0], **kwargs)
 
-        op = None
+        more_toks = None
+        if macro_def is not None:
+            more_toks = macro_def.tokens
+
+        op_tok = self.fetch_operator(elem, more_toks)
+
         if op_tok == '-':
             op = T.USub()
 
         if op_tok == '~':
             op = T.Invert()
 
-        if op is None:
-            print([t.spelling for t in elem.get_tokens()])
-
         assert op is not None
         return T.UnaryOp(op=op, operand=expr)
 
-    binary_operators = {'+', '-', '|'}
+    def fetch_operator(self, elem, toks):
+        # use tokens to find possible operators
+        # get_tokens() is not always populated correctly that is why the parent have to pass down the tokens
+        # but it also means the tokens could have more operators than we have
 
-    def generate_binary_operator(self, elem):
+        # ---
+        possible_ops = set()
+        # use tokens to find possible operators
+        # get_tokens() is not always populated correctly that is why the parent have to pass down the tokens
+        # but it also means the tokens could have more operators than we have
+        if toks is not None:
+            log.debug(f'{toks}')
+        else:
+            toks = [t.spelling for t in elem.get_tokens()]
+            log.debug(f'{toks}')
+
+        assert len(toks) > 0
+
+        for t in toks:
+            if t in ('(', ')', '[', ']', ','):
+                continue
+
+            if t in ops:
+                possible_ops.add(t)
+
+        log.debug(f'Possible operand from tokens {possible_ops}')
+
+        if len(possible_ops) == 0:
+            log.debug('Could not find operand for unary operator expression')
+            return None
+
+        if len(possible_ops) > 1:
+            # we can use location to determine which token is the most likely operand
+            log.debug('FIX ME')
+            assert False
+
+        return possible_ops.pop()
+
+    def generate_binary_operator(self, elem, macro_def: MacroDefinition = None, **kwargs):
         exprs = list(elem.get_children())
         assert len(exprs) == 2
 
-        lhs = self.dispatch(exprs[0])
-        rhs = self.dispatch(exprs[1])
+        lhs = self.dispatch(exprs[0], macro_def=macro_def, **kwargs)
+        rhs = self.dispatch(exprs[1], macro_def=macro_def, **kwargs)
 
-        op_toks = [t.spelling for t in elem.get_tokens()]
+        more_toks = None
+        if macro_def is not None:
+            more_toks = macro_def.tokens
 
-        # print(op_toks)
-        # print(lhs)
-        #
-        # print(elem._kind_id)
-        # print(elem.xdata)
-        # print(elem.data[0])
-        # print(elem.data[1])
-        # print(elem.data[2])
-        #
-        # show_elem(elem)
-        # print(elem.extent.spelling)
-
-        try:
-            op_tok = op_toks[1]
-        except:
-            op_tok = '|'
+        op_tok = self.fetch_operator(elem, more_toks)
 
         op = None
         if op_tok == '<<':
@@ -812,21 +936,30 @@ class BindingGenerator:
         elif op_tok == '|':
             op = T.BitOr()
 
+        assert op is not None
         return T.BinOp(left=lhs, op=op, right=rhs)
 
-    def dispatch(self, elem):
-        fun = self.dispatcher.get(elem.kind, show_elem)
-        return fun(elem)
+    def dispatch(self, elem, depth=0, **kwargs):
+        log.debug(f'{d(depth)} {elem.kind}')
 
-    def generate(self, tu):
+        fun = self.dispatcher.get(elem.kind, None)
+        if fun is None:
+            return show_elem(elem, print_fun=log.debug)
+
+        return fun(elem, depth=depth + 1, **kwargs)
+
+    def generate(self, tu, guard=None):
         module: T.Module = Module()
         module.body = []
 
+        children = sorted_children(tu.cursor)
+        log.debug(f'Processing {len(children)} children')
+
         elem: Cursor
-        for elem in sorted_children(tu.cursor):
+        for elem in children:
             loc: SourceLocation = elem.location
 
-            if loc.file is not None and not str(loc.file.name).startswith('/usr/include/SDL2'):
+            if loc.file is not None and guard is not None and not str(loc.file.name).startswith(guard):
                 continue
 
             try:
@@ -839,7 +972,7 @@ class BindingGenerator:
                     else:
                         module.body.append(T.Expr(expr))
             except Unsupported:
-                print(elem)
+                log.debug(elem)
                 pass
 
         return module
@@ -857,12 +990,12 @@ def generate_bindings():
     tu = index.parse(file, options=0x01)
 
     for diag in tu.diagnostics:
-        print(diag.format())
+        log.debug(diag.format())
 
     gen = BindingGenerator()
-    module = gen.generate(tu)
+    module = gen.generate(tu, guard='/usr/include/SDL2')
 
-    print('=' * 80)
+    log.debug('=' * 80)
 
     import os
     dirname = os.path.dirname(__file__)
@@ -878,7 +1011,17 @@ def generate_bindings():
 
 
 if __name__ == '__main__':
-    generate_bindings()
+    import sys
+
+    logging.basicConfig(stream=sys.stdout)
+    log.setLevel(logging.DEBUG)
+
+    # generate_bindings()
+
+    from tide.generators.clang_utils import parse_clang
+    tu, index = parse_clang('float add(float a, float b);')
+    module = BindingGenerator().generate(tu)
+    print(compact(unparse(module)))
 
     # from tide.generators.clang_utils import parse_clang
     #

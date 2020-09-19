@@ -64,8 +64,14 @@ bad_attributes = {
 }
 
 
-def show_elem(elem: Cursor):
-    print(elem.kind, flush=True)
+def join_args(*args):
+    return ' '.join(str(a) for a in args)
+
+
+def show_elem(elem: Cursor, print_fun=print):
+    new_print = lambda *args: print_fun(join_args(*args))
+
+    new_print(elem.kind)
     avoid_attributes = bad_attributes.get(elem.kind, set())
 
     for attr_name in sorted(dir(elem)):
@@ -94,22 +100,22 @@ def show_elem(elem: Cursor):
             if hasattr(v, 'kind'):
                 k = v.kind
 
-            print('   ', attr_name, v, k, flush=True)
+            new_print('   ', attr_name, v, k)
         else:
-            print('   ', attr_name, attr, flush=True)
+            new_print('   ', attr_name, attr)
 
 
-def traverse(elem: Cursor, depth: int = 0):
+def traverse(elem: Cursor, depth: int = 0, print_fun=print):
     indent = ' ' * depth
 
     if elem is None:
-        print(f'{indent}None')
+        print_fun(f'{indent}None')
         return
-    print(f'{indent}{elem.kind}')
+    print_fun(f'{indent}{elem.kind}')
 
     if hasattr(elem, 'get_children'):
         for child in elem.get_children():
-            traverse(child, depth + 1)
+            traverse(child, depth + 1, print_fun=print_fun)
 
 
 def show_file(filename):

@@ -115,6 +115,14 @@ def parse_c_expression(expression, include=None, ext='c', source='temporary_buff
 undeclared_identifier_error = \
     re.compile(r'.*error: use of undeclared identifier \'(?P<identifier>[a-zA-Z_][a-zA-Z0-9_]*)\'')
 
+# Ignore typing info here, because it is possibly fake
+missing_type_specifier = \
+    re.compile(r'.*warning: type specifier missing, defaults to \'int\'')
+
+# Extract Real Type form implict cast warning
+implicit_conversion = \
+    re.compile(r'.*warning: implicit conversion from \'(?P<real_type>[a-zA-Z_][a-zA-Z0-9_]*)\' to \'(?P<new_type>[a-zA-Z_][a-zA-Z0-9_]*)\'')
+
 
 def parse_c_expression_recursive(expression, include=None, ext='c', source='temporary_buffer_1234') -> Tuple[Cursor, Cursor, TranslationUnit]:
     """Try to automatically fix diagnostic issues.
@@ -149,7 +157,39 @@ def parse_c_expression_recursive(expression, include=None, ext='c', source='temp
         src.append(f'auto {i};')
 
     head = '\n'.join(src)
-    return parse_c_expression(expression, include, ext, source, head)
+    e, t, tu = parse_c_expression(expression, include, ext, source, head)
+
+    type_is_wrong = is_type_wrong(tu)
+
+    if type_is_wrong:
+        t = None
+
+    return e, t, tu
+
+
+def is_type_wrong(tu):
+    for diag in tu.diagnostics:
+        match = missing_type_specifier.match(diag.format())
+        if match is not None:
+            return True
+
+        match = implicit_conversion.match(diag.format())
+        if match is not None:
+            return True
+
+    return False
+
+
+def extract_type(tu):
+    types = []
+
+    for diag in tu.diagnostics:
+        match = implicit_conversion.match(diag.format())
+
+        if match is not None:
+            types.add(match.groupdict()['real_type'])
+
+    return types
 
 
 if __name__ == '__main__':
