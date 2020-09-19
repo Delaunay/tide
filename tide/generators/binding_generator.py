@@ -1,10 +1,12 @@
 import clang.cindex
-from clang.cindex import Cursor, CursorKind, Type, SourceLocation, TypeKind
+from clang.cindex import Cursor, CursorKind, Type, SourceLocation, TypeKind, Token
 
 from tide.generators.api_generators import get_comment, type_mapping
 from tide.generators.clang_utils import parse_c_expression_recursive
-from tide.generators.debug import show_elem, traverse
+from tide.generators.debug import show_elem, traverse, d
+from tide.generators.operator_precedence import is_operator, TokenParser, UnsupportedExpression
 import tide.generators.nodes as T
+
 
 from dataclasses import dataclass
 from typing import List
@@ -14,6 +16,8 @@ from ast import Module
 import logging
 from astunparse import unparse, dump
 
+
+
 import re
 
 
@@ -21,75 +25,6 @@ import re
 empty_line = re.compile(r'^\s*$', re.MULTILINE)
 c_identifier = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
 log = logging.getLogger('TIDE')
-
-
-LeftToRight = 1
-RightToLeft = 2
-Unary = 1
-Binary = 2
-
-operator = {
-    (LeftToRight, '++'): (1, 'Suffix increment', Unary),
-    (LeftToRight, '--'): (1, 'Suffix decrement', Unary),
-    (LeftToRight, '(' ): (1, 'Function call'),       # (LeftToRight, ')' ): 1,
-    (LeftToRight, '[' ): (1, 'Array subscripting'),  # (LeftToRight, ']' ): 1,
-    (LeftToRight, '.' ): (1, 'member access ', Binary),
-    (LeftToRight, '->'): (1, 'member access through pointer', Binary),
-
-    (RightToLeft, '++'): (2, 'Prefix increment', Unary),
-    (RightToLeft, '--'): (2, 'Prefix decrement', Unary),
-    (RightToLeft,  '+'): (2, 'Unary +', Binary),
-    (RightToLeft,  '-'): (2, 'Unary -', Binary),
-    (RightToLeft,  '!'): (2, 'Logical NOT', Unary),
-    (RightToLeft,  '~'): (2, 'bitwise NOT', Unary),
-    (RightToLeft,  '('): (2, 'Cast', Unary),
-    (RightToLeft,  '*'): (2, 'Indirection', Unary),
-    (RightToLeft,  '&'): (2, 'Address-of', Unary),
-    (RightToLeft, 'sizeof'): (2, 'Size-of'),
-    (RightToLeft, '_Alignof'): (2, 'Alignment requirement'),
-
-    (LeftToRight, '*'): (3, 'Multiplication', Binary),
-    (LeftToRight, '%'): (3, 'Remainder', Binary),
-    (LeftToRight, '/'): (3, 'Division', Binary),
-
-    (LeftToRight, '+'): (4, 'Add', Binary),
-    (LeftToRight, '-'): (4, 'Sub', Binary),
-
-    (LeftToRight, '<<'): (5, 'Bitwise left shift', Binary),
-    (LeftToRight, '>>'): (5, 'Bitwise right shift', Binary),
-
-    (LeftToRight, '<'): (6, 'lt', Binary),
-    (LeftToRight, '>'): (6, 'gt', Binary),
-    (LeftToRight, '<='): (6, 'lte', Binary),
-    (LeftToRight, '>='): (6, 'gte', Binary),
-
-    (LeftToRight, '=='): (7, 'Equal', Binary),
-    (LeftToRight, '!='): (7, 'Not Equal', Binary),
-
-    (LeftToRight, '&'): (8, 'Bitwise AND', Binary),
-    (LeftToRight, '^'): (9, 'Bitwise XOR', Binary),
-    (LeftToRight, '|'): (10, 'Bitwise OR', Binary),
-    (LeftToRight, '&&'): (11, 'Logical AND', Binary),
-    (LeftToRight, '||'): (12, 'Logical OR', Binary),
-
-    (RightToLeft, '?'): (13, 'Ternary conditional', Binary),
-
-    (RightToLeft, '='  ): (14, '', Binary),
-    (RightToLeft, '+=' ): (14, '', Binary),
-    (RightToLeft, '-=' ): (14, '', Binary),
-    (RightToLeft, '*=' ): (14, '', Binary),
-    (RightToLeft, '/=' ): (14, '', Binary),
-    (RightToLeft, '%=' ): (14, '', Binary),
-    (RightToLeft, '<<='): (14, '', Binary),
-    (RightToLeft, '>>='): (14, '', Binary),
-    (RightToLeft, '&=' ): (14, '', Binary),
-    (RightToLeft, '^=' ): (14, '', Binary),
-    (RightToLeft, '|=' ): (14, '', Binary),
-
-    (LeftToRight, ','): (15, 'Comma', Binary),
-}
-
-ops = {k for (_, k) in operator}
 
 
 @dataclass
@@ -103,11 +38,6 @@ def is_valid(name):
     # flag something like below as invalid
     # union SDL_GameControllerButtonBind::(anonymous at /usr/include/SDL2/SDL_gamecontroller.h:75:5)
     return not all(c in name for c in (':', '(', '.', ' '))
-
-
-def d(depth=0):
-    s = '|:' * depth
-    return s + '-> '
 
 
 def get_typename(type: Type) -> T.Name:
@@ -126,39 +56,95 @@ class Unsupported(Exception):
     pass
 
 
+class _Token:
+    def __init__(self, a):
+        self.spelling = a
+
+    def __repr__(self):
+        return f'\'{self.spelling}\''
+
+
+def to_tokens(*args):
+    return [_Token(a) for a in args]
+
+
+def to_string(*args):
+    return [a.spelling for a in args]
+
+
 # it is hard to know if we have a `callable` macro or not
 # in C/C++ the difference is a space between the defined name and the parenthesis
 # but Clang erase all superfluous space so we cannot know right away
 def parse_macro(tokens):
+    """
+
+    Examples
+    --------
+    >>> toks = to_tokens(
+    ...     'SDL_reinterpret_cast', '(', 'type', ',', 'expression', ')',
+    ...     '(', '(', 'type', ')', '(', 'expression', ')', ')'
+    ... )
+    >>> name, args, body = parse_macro(toks)
+    >>> name.spelling
+    'SDL_reinterpret_cast'
+    >>> list(args)
+    ['type', 'expression']
+    >>> list(body)
+    ['(', '(', 'type', ')', '(', 'expression', ')', ')']
+    """
     name = tokens[0]
     args = []
 
     i = 0
-    if tokens[1] == '(':
+    if tokens[1].spelling == '(':
+        if tokens[2].spelling == ')':
+            return name, [], list(tokens[3:])
+
         i = 2
         tok = tokens[i]
-        while tok != ')':
-            if tok != ',':
+        while tok.spelling != ')':
+            if tok.spelling != ',':
                 # argument is not an identifier
-                if re.match(c_identifier, tok) is not None:
+                if re.match(c_identifier, tok.spelling) is not None:
                     args.append(tok)
                 else:
-                    return name, [], tokens[1:]
+                    log.debug(f'{tok.spelling} not an identifier')
+                    return name, [], list(tokens[1:])
 
             i += 1
             tok = tokens[i]
 
     # arguments should be used in the body
     # else we think it is a macro without arg
-    body = tokens[i + 1:]
+    body = list(tokens[i + 1:])
+
     for arg in reversed(args):
-        if not arg in body:
-            return name, [], tokens[1:]
+        for b in body:
+            if arg.spelling == b.spelling:
+                break
+        else:
+            log.debug(f'argument unused {arg.spelling} {body}')
+            return name, [], list(tokens[1:])
 
     if len(args) == 0:
-        return name, [], tokens[1:]
+        return name, [], list(tokens[1:])
 
     return name, args, body
+
+
+def parse_macro2(name, args, body: List[Token]):
+    # there is a shit load of token kind
+    # https://github.com/llvm/llvm-project/blob/master/clang/include/clang/Basic/TokenKinds.def
+
+    log.debug(name.spelling)
+    for b in body:
+        log.debug(f'{b.kind} {b.spelling}')
+
+    parser = TokenParser(body)
+    expr = parser.parse_expression()
+
+    print(expr)
+    return expr
 
 
 def sorted_children(cursor):
@@ -742,9 +728,7 @@ class BindingGenerator:
                 show_elem(child, print_fun=log.debug)
                 assert False
 
-        raw_tokens = [t.spelling for t in tokens]
-
-        if len(raw_tokens) == 1:
+        if len(tokens) == 1:
             return
 
         include = elem.location.file.name
@@ -752,61 +736,70 @@ class BindingGenerator:
             include = None
 
         # Try to fetch the value of the macro after instantiation
-        name, args, body = parse_macro(raw_tokens)
-        macro_def = MacroDefinition(name, args, body)
-        expr, type, _ = parse_c_expression_recursive(name, include=include)
+        # split the tokens into args and body
+        # note that this is guessing as clang does not provide a way to identify
+        # the arguments from the body
+        name, tok_args, tok_body = parse_macro(tokens)
 
-        # macro lookup did not work and it just got resolve to itself
-        if expr is not None and expr.spelling == name:
-            traverse(expr, print_fun=log.debug)
-            expr = None
+        try:
+            py_body = parse_macro2(name, tok_args, tok_body)
 
-        if expr is None:
-            # Try to make clang parse the expression so we can generate code for it
-            log.debug(raw_tokens)
-            c_expr = ''.join(body)
-
-            expr, type, tu = parse_c_expression_recursive(c_expr, include=include)
-
-            for diag in tu.diagnostics:
-                log.debug(diag.format())
-
-            log.debug(f'{c_expr}, {expr}, {type}')
-
-        # expr is not which means we were not able to parse it
-        # Example: __attribute__((deprecated))
-        if expr is None:
-            log.warning(f'Ignoring macro {name} because it was not convertible')
+        except UnsupportedExpression:
+            body = [b.spelling for b in tok_body]
+            log.warning(f'Unsupported expression, cannot transform macro {name} {"".join(body)}')
             return
 
-        # done
-        py_expr = self.dispatch(expr, macro_def=macro_def, **kwargs)
-
-        py_type = None
-        if type is not None:
-            py_type = self.generate_type(type, **kwargs)
-
-        if py_expr is None:
-            traverse(expr, print_fun=log.debug)
-            traverse(type, print_fun=log.debug)
-
-        assert py_expr is not None
-
         if len(args) == 0:
-            value = py_expr
-            if len(body) == 0:
-                value = T.Str(name)
+            return T.Assign([T.Name(name)], py_body)
 
-            if py_type is not None:
-                return T.AnnAssign(T.Name(name), py_type, value)
-
-            return T.Assign([T.Name(name)], value)
-
-        func = T.FunctionDef(name, T.Arguments(args=[T.Arg(arg=a) for a in args]))
+        func = T.FunctionDef(name, T.Arguments(args=[T.Arg(arg=a.spelling) for a in tok_args]))
         func.body = [
-            T.Return(py_expr)
+            T.Return(py_body)
         ]
         return func
+
+        #
+        # args = [b.spelling for b in tok_args]
+        #
+        # macro_def = MacroDefinition(name, args, body)
+        # expr, type, _ = parse_c_expression_recursive(name, include=include)
+        #
+        # # macro lookup did not work and it just got resolve to itself
+        # if expr is not None and expr.spelling == name:
+        #     traverse(expr, print_fun=log.debug)
+        #     expr = None
+        #
+        # if expr is None:
+        #     # Try to make clang parse the expression so we can generate code for it
+        #     log.debug(tokens)
+        #     c_expr = ''.join(body)
+        #
+        #     expr, type, tu = parse_c_expression_recursive(c_expr, include=include)
+        #
+        #     for diag in tu.diagnostics:
+        #         log.debug(diag.format())
+        #
+        #     log.debug(f'{c_expr}, {expr}, {type}')
+        #
+        # # expr is not which means we were not able to parse it
+        # # Example: __attribute__((deprecated))
+        # if expr is None:
+        #     log.warning(f'Ignoring macro {name} because it was not convertible')
+        #     return
+        #
+        # # done
+        # py_expr = self.dispatch(expr, macro_def=macro_def, **kwargs)
+        #
+        # py_type = None
+        # if type is not None:
+        #     py_type = self.generate_type(type, **kwargs)
+        #
+        # if py_expr is None:
+        #     traverse(expr, print_fun=log.debug)
+        #     traverse(type, print_fun=log.debug)
+        #
+        # assert py_expr is not None
+
 
     def generate_c_cast(self, elem, **kwargs):
         show_elem(elem)
@@ -899,7 +892,7 @@ class BindingGenerator:
             if t in ('(', ')', '[', ']', ','):
                 continue
 
-            if t in ops:
+            if is_operator(t):
                 possible_ops.add(t)
 
         log.debug(f'Possible operand from tokens {possible_ops}')
@@ -1012,11 +1005,12 @@ def generate_bindings():
 
 if __name__ == '__main__':
     import sys
+    sys.stderr = sys.stdout
 
     logging.basicConfig(stream=sys.stdout)
     log.setLevel(logging.DEBUG)
 
-    # generate_bindings()
+    generate_bindings()
 
     from tide.generators.clang_utils import parse_clang
     tu, index = parse_clang('float add(float a, float b);')

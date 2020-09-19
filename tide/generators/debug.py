@@ -64,6 +64,11 @@ bad_attributes = {
 }
 
 
+def d(depth=0):
+    s = '|:' * depth
+    return s + '+-> '
+
+
 def join_args(*args):
     return ' '.join(str(a) for a in args)
 

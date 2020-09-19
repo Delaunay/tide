@@ -470,6 +470,9 @@ class BinOp(Expression):
     def __hash__(self):
         return hash(''.join(str(hash(v)) for v in [self.left, self.op, self.right]))
 
+    def __repr__(self):
+        return f'BinOp(left={self.left}, op={self.op}, right={self.right})'
+
 
 #  expr Constructor(UnaryOp, [Field(unaryop, op), Field(expr, operand)])
 @dataclass
@@ -668,6 +671,9 @@ class Constant(Expression):
     def __hash__(self):
         return hash(self.value)
 
+    def __repr__(self):
+        return f'Constant(value={self.value})'
+
 
 # For python <=3.7
 #  expr Constructor(Constant, [Field(constant, value), Field(string, kind, opt=True)])
@@ -697,10 +703,10 @@ class Subscript(Expression):
     value: Expression
     slice: Slice
     ctx: ExpressionContext
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
 
 
 #  expr Constructor(Starred, [Field(expr, value), Field(expr_context, ctx)])
@@ -792,32 +798,32 @@ class Param(ExpressionContext):
 #  slice Constructor(Slice, [Field(expr, lower, opt=True), Field(expr, upper, opt=True), Field(expr, step, opt=True)])
 @dataclass
 class Slice(Slice):
-    lower: Optional[Expression]
-    upper: Optional[Expression]
-    step: Optional[Expression]
+    lower: Optional[Expression] = None
+    upper: Optional[Expression] = None
+    step: Optional[Expression] = None
 
 
 #  slice Constructor(ExtSlice, [Field(slice, dims, seq=True)])
 @dataclass
 class ExtSlice(Slice):
-    dims: ListT[Slice]
+    dims: ListT[Slice] = None
 
 
 #  slice Constructor(Index, [Field(expr, value)])
 @dataclass
 class Index(Slice):
-    value: Expression
+    value: Expression = None
 
 
 #  boolop Constructor(And, [])
 @dataclass
-class And(BoolOp):
+class And(Operator):
     pass
 
 
 #  boolop Constructor(Or, [])
 @dataclass
-class Or(BoolOp):
+class Or(Operator):
     pass
 
 
@@ -925,59 +931,101 @@ class USub(Operand):
 
 #  cmpop Constructor(Eq, [])
 @dataclass
-class Eq(Compare):
+class Eq(Operand):
     pass
 
 
 #  cmpop Constructor(NotEq, [])
 @dataclass
-class NotEq(Compare):
+class NotEq(Operand):
     pass
 
 
 #  cmpop Constructor(Lt, [])
 @dataclass
-class Lt(Compare):
+class Lt(Operand):
     pass
 
 
 #  cmpop Constructor(LtE, [])
 @dataclass
-class LtE(Compare):
+class LtE(Operand):
     pass
 
 
 #  cmpop Constructor(Gt, [])
 @dataclass
-class Gt(Compare):
+class Gt(Operand):
     pass
 
 
 #  cmpop Constructor(GtE, [])
 @dataclass
-class GtE(Compare):
+class GtE(Operand):
     pass
 
 
 #  cmpop Constructor(Is, [])
 @dataclass
-class Is(Compare):
+class Is(Operand):
     pass
 
 
 #  cmpop Constructor(IsNot, [])
 @dataclass
-class IsNot(Compare):
+class IsNot(Operand):
     pass
 
 
 #  cmpop Constructor(In, [])
 @dataclass
-class In(Compare):
+class In(Operand):
     pass
 
 
 #  cmpop Constructor(NotIn, [])
 @dataclass
-class NotIn(Compare):
+class NotIn(Operand):
     pass
+
+
+@dataclass
+class UMult(Operand):
+    pass
+
+
+@dataclass
+class UDiv(Operand):
+    pass
+
+
+@dataclass
+class UMod(Operand):
+    pass
+
+
+@dataclass
+class URShift(Operand):
+    pass
+
+
+@dataclass
+class ULShift(Operand):
+    pass
+
+
+@dataclass
+class UBitAnd(Operand):
+    pass
+
+
+@dataclass
+class UBitXor(Operand):
+    pass
+
+
+@dataclass
+class UBitOr(Operand):
+    pass
+
+
