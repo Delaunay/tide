@@ -160,9 +160,6 @@ class TokenParser:
     SDL_AUDIO_ALLOW_ANY_CHANGE = (SDL_AUDIO_ALLOW_FREQUENCY_CHANGE | (SDL_AUDIO_ALLOW_FORMAT_CHANGE | SDL_AUDIO_ALLOW_CHANNELS_CHANGE))
     <BLANKLINE>
 
-    Issues
-    ------
-    c-style cast have the wrong precedence
     """
     def __init__(self, tokens, definitions, registry):
         self.tokens = tokens

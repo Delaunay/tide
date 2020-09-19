@@ -9,10 +9,12 @@ import ctypes
 
 
 def main():
-    SDL_Init(0x00000020)
-    window = SDL_CreateWindow(b"Hello World",
-                              0, 0,
-                              592, 460, SDL_WINDOW_SHOWN)
+    SDL_Init(SDL_INIT_VIDEO)
+    window = SDL_CreateWindow(
+        b"Hello World",
+      SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+      592, 460, SDL_WINDOW_SHOWN)
+
     windowsurface = SDL_GetWindowSurface(window)
 
     # image = SDL_LoadBMP(b"exampleimage.bmp")

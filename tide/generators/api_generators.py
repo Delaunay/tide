@@ -38,31 +38,6 @@ POD = {
 }
 
 
-def type_mapping():
-    return {
-        'int': T.Name('c_int'),
-        'unsigned int': T.Name('c_uint'),
-        'long': T.Name('c_long'),
-        'unsigned long': T.Name('c_ulong'),
-        'unsigned char': T.Name('c_ubyte'),
-        'unsigned short': T.Name('c_ushort'),
-        'short': T.Name('c_short'),
-        'float': T.Name('c_float'),
-        'double': T.Name('c_double'),
-        'int8_t': T.Name('c_int8'),
-        'uint8_t': T.Name('c_uint8'),
-        'int16_t': T.Name('c_int16'),
-        'uint16_t': T.Name('c_uint16'),
-        'int32_t': T.Name('c_int32'),
-        'uint32_t': T.Name('c_uint32'),
-        'int64_t': T.Name('c_int64'),
-        'uint64_t': T.Name('c_uint64'),
-        'void *': T.Name('c_void_p'),
-        'size_t': T.Name('c_uint64'),
-        'FILE *': T.Name('c_void_p'),
-    }
-
-
 def reformat_comment(comment):
     return (comment
             # Beginning of comment

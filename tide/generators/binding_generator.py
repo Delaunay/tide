@@ -10,8 +10,6 @@ import clang.cindex
 from clang.cindex import Cursor, CursorKind, Type, SourceLocation, TypeKind, Token
 
 
-from tide.generators.api_generators import get_comment, type_mapping
-from tide.generators.clang_utils import parse_c_expression_recursive
 from tide.generators.debug import show_elem, traverse, d
 from tide.generators.operator_precedence import is_operator, TokenParser, UnsupportedExpression
 import tide.generators.nodes as T
@@ -21,6 +19,31 @@ import tide.generators.nodes as T
 empty_line = re.compile(r'^\s*$', re.MULTILINE)
 c_identifier = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
 log = logging.getLogger('TIDE')
+
+
+def type_mapping():
+    return {
+        'int': T.Name('c_int'),
+        'unsigned int': T.Name('c_uint'),
+        'long': T.Name('c_long'),
+        'unsigned long': T.Name('c_ulong'),
+        'unsigned char': T.Name('c_ubyte'),
+        'unsigned short': T.Name('c_ushort'),
+        'short': T.Name('c_short'),
+        'float': T.Name('c_float'),
+        'double': T.Name('c_double'),
+        'int8_t': T.Name('c_int8'),
+        'uint8_t': T.Name('c_uint8'),
+        'int16_t': T.Name('c_int16'),
+        'uint16_t': T.Name('c_uint16'),
+        'int32_t': T.Name('c_int32'),
+        'uint32_t': T.Name('c_uint32'),
+        'int64_t': T.Name('c_int64'),
+        'uint64_t': T.Name('c_uint64'),
+        'void *': T.Name('c_void_p'),
+        'size_t': T.Name('c_uint64'),
+        'FILE *': T.Name('c_void_p'),
+    }
 
 
 @dataclass
@@ -73,7 +96,6 @@ def to_string(*args):
 # but Clang erase all superfluous space so we cannot know right away
 def parse_macro(tokens):
     """
-
     Examples
     --------
     with arguments
@@ -151,7 +173,6 @@ def parse_macro(tokens):
 def parse_macro2(name, args, body: List[Token], definitions=None, registry=None):
     parser = TokenParser(body, definitions, registry)
     expr = parser.parse_expression()
-
     return expr
 
 
@@ -241,6 +262,13 @@ class BindingGenerator:
     This generate a verbatim translation of the library the result is far from pythonic
 
     The API generator pass can later be applied to the result to generate a more organized version
+
+    Notes
+    -----
+    This generate a python AST, the python code is generate using the ast unparse function.
+    Generating python AST instead of string allow us to make multiple pass over the AST before
+    returning the final result
+
     """
 
     def __init__(self):
