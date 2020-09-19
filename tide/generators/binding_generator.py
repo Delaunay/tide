@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import logging
 import re
 from typing import List
+from os.path import commonprefix
 
 from astunparse import unparse, dump
 import clang.cindex
@@ -170,8 +171,8 @@ def parse_macro(tokens):
     return name, args, body
 
 
-def parse_macro2(name, args, body: List[Token], definitions=None, registry=None):
-    parser = TokenParser(body, definitions, registry)
+def parse_macro2(name, args, body: List[Token], definitions=None, registry=None, rename=None):
+    parser = TokenParser(body, definitions, registry, rename)
     expr = parser.parse_expression()
     return expr
 
@@ -280,6 +281,8 @@ class BindingGenerator:
         # those definition in particular are Compiler builtin
         # this is so we can do our own macro expansion when required
         self.definitions = dict()
+        self.renaming = dict()
+        self.import_enum = False
         self.dispatcher = {
             # Declarations
             CursorKind.FUNCTION_DECL: self.generate_function,
@@ -507,6 +510,9 @@ class BindingGenerator:
         if not is_valid(pyname):
             pyname = ''
 
+        if pyname in self.renaming:
+            return self.renaming[pyname]
+
         return pyname
 
     def find_anonymous_fields(self, elem, parent='', depth=0):
@@ -653,6 +659,19 @@ class BindingGenerator:
         fields = T.Assign([T.Attribute(T.Name(pyname), '_fields_')], attrs)
         return [T.ClassDef(name=pyname, bases=[T.Name(base)], body=body), fields]
 
+    global_enum = False
+    short_enum_names = True
+
+    def find_duplicate_name(self, elem):
+        names = []
+
+        for value in elem.get_children():
+            if value.kind == CursorKind.ENUM_CONSTANT_DECL:
+                n = self.get_name(value)
+                names.append(n)
+
+        return commonprefix(names)
+
     def generate_enum(self, elem: Cursor, depth=0, **kwargs):
         """ Generate a enum
 
@@ -663,31 +682,57 @@ class BindingGenerator:
         >>> module = BindingGenerator().generate(tu)
         >>> print(compact(unparse(module)))
         <BLANKLINE>
-        Colors = c_int
-        <BLANKLINE>
-        Red = 0
-        <BLANKLINE>
-        Green = 1
-        <BLANKLINE>
-        Blue = 2
+        class Colors(Enum):
+            Red = 0
+            Green = 1
+            Blue = 2
         <BLANKLINE>
         """
         log.debug(f'{d(depth)}Generate Enum')
         name = self.get_name(elem)
-
         enum = []
+        ctypes = self.type_registry.get('int')
+        common = self.find_duplicate_name(elem)
 
-        if name:
+        if name == '':
+            name = common
+            if name[-1] == '_':
+                name = name[:-1]
+
+        if self.global_enum:
             enum.append(T.Assign([T.Name(name)], self.type_registry.get('int')))
+
+        def shorten_name(n):
+            if len(n) == len(common):
+                return n
+
+            if self.short_enum_names:
+                new_name = n[len(common):]
+
+                if not new_name[0].isalpha():
+                    return n
+
+                # rename SDL_PIXELTYPE_UNKNOWN to SDL_PIXELTYPE.UNKNOWN
+                # useful to get editor auto-completion to show relevant values
+                self.renaming[n] = T.Attribute(T.Name(name), new_name)
+                return new_name
+            return n
 
         for value in elem.get_children():
             if value.kind == CursorKind.ENUM_CONSTANT_DECL:
-                enum.append(T.Assign(
-                    [T.Name(self.get_name(value))],
-                    T.Constant(value.enum_value)))
+                n = shorten_name(self.get_name(value))
+                enum.append(T.Assign([T.Name(n)], T.Constant(value.enum_value)))
             else:
                 log.error(f'Unexpected children {value.kind}')
                 raise RuntimeError()
+
+        if not self.global_enum:
+            # this require renaming the code where the enum were used
+            # not implemented yet
+            self.import_enum = True
+            enum_class = T.ClassDef(name, bases=[ctypes])
+            enum_class.body = enum
+            return enum_class
 
         return enum
 
@@ -793,7 +838,13 @@ class BindingGenerator:
             if not bods.isdisjoint(self.unsupported_macros):
                 raise UnsupportedExpression()
 
-            py_body = parse_macro2(name, tok_args, tok_body, self.definitions, self.type_registry)
+            py_body = parse_macro2(
+                name,
+                tok_args,
+                tok_body,
+                self.definitions,
+                self.type_registry,
+                self.renaming)
 
         except UnsupportedExpression:
             self.unsupported_macros.add(name.spelling)
@@ -1055,6 +1106,9 @@ def generate_bindings():
 
     with open(os.path.join(dirname, '..', '..', 'output', 'sdl2.py'), 'w') as f:
         f.write("""import os\n""")
+        # if gen.import_enum:
+        #    f.write("""from enum import Enum\n""")
+        f.write("""\n""")
         f.write("""from tide.runtime.loader import DLL\n""")
         f.write("""from tide.runtime.ctypes_ext import *\n""")
         f.write("""_lib = DLL("SDL2", ["SDL2", "SDL2-2.0"], os.getenv("PYSDL2_DLL_PATH"))\n""")

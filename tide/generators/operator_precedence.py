@@ -161,7 +161,7 @@ class TokenParser:
     <BLANKLINE>
 
     """
-    def __init__(self, tokens, definitions, registry):
+    def __init__(self, tokens, definitions, registry, rename):
         self.tokens = tokens
         # for tok in tokens:
         #     if tok.spelling != '\\':
@@ -173,10 +173,14 @@ class TokenParser:
         if registry is None:
             registry = dict()
 
+        if rename is None:
+            rename = dict()
+
         self.pos = 0
         self.is_call = [False]
         self.definitions = definitions
         self.registry = registry
+        self.rename = rename
 
         # there is a shit load of token kind
         # https://github.com/llvm/llvm-project/blob/master/clang/include/clang/Basic/TokenKinds.def
@@ -341,9 +345,14 @@ class TokenParser:
     }
 
     def parse_keyword(self, tok: Token, depth):
+        tok_spelling = tok.spelling
+
+        if tok.kind == TokenKind.IDENTIFIER and tok_spelling in self.rename:
+            tok_spelling = self.rename[tok_spelling]
+
         # do the macro expansion
-        if tok.kind == TokenKind.IDENTIFIER and tok.spelling in self.definitions:
-            name = tok.spelling
+        elif tok.kind == TokenKind.IDENTIFIER and tok_spelling in self.definitions:
+            name = tok_spelling
             v = self.definitions[name]
 
             # make sure we set it to a constant/expression
@@ -352,7 +361,7 @@ class TokenParser:
 
             return v
 
-        log.debug(f'{d(depth)} parse_keyword {tok.kind} {tok.spelling}')
+        log.debug(f'{d(depth)} parse_keyword {tok.kind} {tok_spelling}')
 
         if tok.spelling in self.unsupported_keywords:
             raise UnsupportedExpression()
@@ -363,7 +372,7 @@ class TokenParser:
         name = tok.spelling
         if nexttok and nexttok.spelling == '*':
             self.next()
-            name = f'{tok.spelling} *'
+            name = f'{tok_spelling} *'
 
         if name in self.registry:
             name = self.registry[name]
@@ -380,9 +389,12 @@ class TokenParser:
             return self.parse_call(name, depth + 1)
 
         if tok.spelling in self.registry:
-            return self.registry[tok.spelling]
+            return self.registry[tok_spelling]
 
-        return T.Name(tok.spelling)
+        if isinstance(tok_spelling, str):
+            return T.Name(tok_spelling)
+
+        return tok_spelling
 
     def parse_call(self, expr, depth):
         log.debug(f'{d(depth)} parse_call {expr}')

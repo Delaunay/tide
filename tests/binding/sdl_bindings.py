@@ -13,7 +13,7 @@ def main():
     window = SDL_CreateWindow(
         b"Hello World",
       SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-      592, 460, SDL_WINDOW_SHOWN)
+      592, 460, SDL_WindowFlags.SHOWN)
 
     windowsurface = SDL_GetWindowSurface(window)
 
@@ -27,7 +27,7 @@ def main():
     event = SDL_Event()
     while running:
         while SDL_PollEvent(ctypes.byref(event)) != 0:
-            if event.type == SDL_QUIT:
+            if event.type == SDL_EventType.QUIT:
                 running = False
                 break
 
