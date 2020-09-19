@@ -1,24 +1,20 @@
+import ast
+from ast import Module
+from dataclasses import dataclass
+import logging
+import re
+from typing import List
+
+from astunparse import unparse, dump
 import clang.cindex
 from clang.cindex import Cursor, CursorKind, Type, SourceLocation, TypeKind, Token
+
 
 from tide.generators.api_generators import get_comment, type_mapping
 from tide.generators.clang_utils import parse_c_expression_recursive
 from tide.generators.debug import show_elem, traverse, d
 from tide.generators.operator_precedence import is_operator, TokenParser, UnsupportedExpression
 import tide.generators.nodes as T
-
-
-from dataclasses import dataclass
-from typing import List
-
-import ast
-from ast import Module
-import logging
-from astunparse import unparse, dump
-
-
-
-import re
 
 
 # empty_line = re.compile(r'((\r\n|\n|\r)$)|(^(\r\n|\n|\r))|^\s*$', re.MULTILINE)
@@ -80,6 +76,7 @@ def parse_macro(tokens):
 
     Examples
     --------
+    with arguments
     >>> toks = to_tokens(
     ...     'SDL_reinterpret_cast', '(', 'type', ',', 'expression', ')',
     ...     '(', '(', 'type', ')', '(', 'expression', ')', ')'
@@ -91,11 +88,25 @@ def parse_macro(tokens):
     ['type', 'expression']
     >>> list(body)
     ['(', '(', 'type', ')', '(', 'expression', ')', ')']
+
+    Ambigous
+    >>> toks = to_tokens(
+    ...     'SDL_IN_BYTECAP', '(', 'x', ')'
+    ... )
+    >>> name, args, body = parse_macro(toks)
+    >>> name.spelling
+    'SDL_IN_BYTECAP'
+    >>> list(args)
+    ['x']
+    >>> list(body)
+    []
+
     """
     name = tokens[0]
     args = []
 
     i = 0
+
     if len(tokens) > 1 and tokens[1].spelling == '(':
         if tokens[2].spelling == ')':
             return name, [], list(tokens[3:])
@@ -118,6 +129,11 @@ def parse_macro(tokens):
     # else we think it is a macro without arg
     body = list(tokens[i + 1:])
 
+    # empty macro
+    # happens often enough
+    if len(body) == 0:
+        return name, args, body
+
     for arg in reversed(args):
         for b in body:
             if arg.spelling == b.spelling:
@@ -133,17 +149,9 @@ def parse_macro(tokens):
 
 
 def parse_macro2(name, args, body: List[Token], definitions=None):
-    # there is a shit load of token kind
-    # https://github.com/llvm/llvm-project/blob/master/clang/include/clang/Basic/TokenKinds.def
-
-    log.debug(name.spelling)
-    for b in body:
-        log.debug(f'{b.kind} {b.spelling}')
-
     parser = TokenParser(body, definitions)
     expr = parser.parse_expression()
 
-    print(expr)
     return expr
 
 
@@ -454,7 +462,7 @@ class BindingGenerator:
         return T.Assign([T.Name(funnane)], binding_call)
 
     def get_name(self, elem, rename=None, depth=0):
-        log.debug(f'{d(depth)}Fetch name')
+        # log.debug(f'{d(depth)}Fetch name')
         pyname = elem.spelling
 
         if hasattr(elem, 'displayname') and elem.displayname:
@@ -659,24 +667,26 @@ class BindingGenerator:
         log.debug(f'including f{elem.spelling}')
 
     def generate_macro_instantiation(self, elem: Cursor, **kwargs):
-        macro_definition = elem.get_definition()
-        if macro_definition is not None and macro_definition.location.file is None:
-            return
+        return None
 
-        log.debug(f'Macro call {elem.spelling}')
-        # show_elem(elem)
-        args = list(elem.get_arguments())
-        children = list(elem.get_children())
-
-        if len(args) != 0:
-            for arg in args:
-                show_elem(arg)
-                assert False
-
-        if len(children) != 0:
-            for child in children:
-                show_elem(child)
-                assert False
+        # macro_definition = elem.get_definition()
+        # if macro_definition is not None and macro_definition.location.file is None:
+        #     return
+        #
+        # log.debug(f'Macro call {elem.spelling}')
+        # # show_elem(elem)
+        # args = list(elem.get_arguments())
+        # children = list(elem.get_children())
+        #
+        # if len(args) != 0:
+        #     for arg in args:
+        #         show_elem(arg)
+        #         assert False
+        #
+        # if len(children) != 0:
+        #     for child in children:
+        #         show_elem(child)
+        #         assert False
 
         # return T.Name(elem.spelling)
 
@@ -716,7 +726,7 @@ class BindingGenerator:
         <BLANKLINE>
         SDL_AUDIO_ALLOW_CHANNELS_CHANGE = 4
         <BLANKLINE>
-        SDL_AUDIO_ALLOW_ANY_CHANGE = ((SDL_AUDIO_ALLOW_FREQUENCY_CHANGE | SDL_AUDIO_ALLOW_FORMAT_CHANGE) | SDL_AUDIO_ALLOW_CHANNELS_CHANGE)
+        SDL_AUDIO_ALLOW_ANY_CHANGE = (SDL_AUDIO_ALLOW_FREQUENCY_CHANGE | (SDL_AUDIO_ALLOW_FORMAT_CHANGE | SDL_AUDIO_ALLOW_CHANNELS_CHANGE))
         <BLANKLINE>
         """
         # builtin macros
@@ -742,15 +752,11 @@ class BindingGenerator:
         if len(tokens) == 1:
             return
 
-        include = elem.location.file.name
-        if include == 'temporary_buffer_1234.c':
-            include = None
-
-        # Try to fetch the value of the macro after instantiation
-        # split the tokens into args and body
-        # note that this is guessing as clang does not provide a way to identify
-        # the arguments from the body
         name, tok_args, tok_body = parse_macro(tokens)
+
+        if len(tok_body) == 0:
+            return
+
         try:
             bods = {t.spelling for t in tok_body}
             if not bods.isdisjoint(self.unsupported_macros):
@@ -919,7 +925,7 @@ class BindingGenerator:
         return T.BinOp(left=lhs, op=op, right=rhs)
 
     def dispatch(self, elem, depth=0, **kwargs):
-        log.debug(f'{d(depth)} {elem.kind}')
+        # log.debug(f'{d(depth)} {elem.kind}')
 
         fun = self.dispatcher.get(elem.kind, None)
         if fun is None:
@@ -956,12 +962,11 @@ class BindingGenerator:
         assert len(builtin) > 0
         # Process every builtin macros
         for b in builtin:
-            print(b.kind)
             if b.kind == CursorKind.MACRO_DEFINITION:
                 self.process_builtin_macros(b)
 
-        for k, v in self.definitions.items():
-            print(k, v)
+        # for k, v in self.definitions.items():
+        #      print(k, v)
 
         # __BYTE_ORDER__ is defined by clang, __BYTE_ORDER is defined by other includes
         self.definitions['__BYTE_ORDER'] = self.definitions['__BYTE_ORDER__']

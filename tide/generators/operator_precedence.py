@@ -6,7 +6,7 @@ import tide.generators.nodes as T
 from tide.generators.debug import show_elem, d
 
 
-log = logging.getLogger('TIDE')
+log = logging.getLogger(__name__)
 
 LeftToRight = 1
 RightToLeft = 2
@@ -156,7 +156,7 @@ class TokenParser:
     <BLANKLINE>
     SDL_AUDIO_ALLOW_CHANNELS_CHANGE = 4
     <BLANKLINE>
-    SDL_AUDIO_ALLOW_ANY_CHANGE = ((SDL_AUDIO_ALLOW_FREQUENCY_CHANGE | SDL_AUDIO_ALLOW_FORMAT_CHANGE) | SDL_AUDIO_ALLOW_CHANNELS_CHANGE)
+    SDL_AUDIO_ALLOW_ANY_CHANGE = (SDL_AUDIO_ALLOW_FREQUENCY_CHANGE | (SDL_AUDIO_ALLOW_FORMAT_CHANGE | SDL_AUDIO_ALLOW_CHANNELS_CHANGE))
     <BLANKLINE>
 
     """
@@ -172,6 +172,10 @@ class TokenParser:
         self.pos = 0
         self.is_call = [False]
         self.definitions = definitions
+
+        # there is a shit load of token kind
+        # https://github.com/llvm/llvm-project/blob/master/clang/include/clang/Basic/TokenKinds.def
+
         self.primary_dispatch = {
             TokenKind.LITERAL: self.parse_literal,
             TokenKind.KEYWORD: self.parse_keyword,
@@ -365,19 +369,20 @@ class TokenParser:
     int_types = ['ull', 'll', 'u', 'U', 'L', ]
 
     def parse_int(self, val):
-        if '0x' in val:
+        if val.startswith('0x'):
             return T.Constant(int(val, base=16))
 
         try:
-            value_i = int(val)
-            value_f = float(val)
-
-            if value_f == value_i:
-                return T.Constant(value_i)
-
-            return T.Constant(value_f)
+            return T.Constant(int(val))
         except ValueError:
-            return None
+            pass
+
+        try:
+            return T.Constant(float(val))
+        except ValueError:
+            pass
+
+        return None
 
     def is_int_annotated(self, val):
         for type in self.int_types:
@@ -401,7 +406,7 @@ class TokenParser:
 
         # the rest
         if val is None:
-            return T.Constant(str(val))
+            val = T.Constant(str(tok.spelling))
 
         return val
 
