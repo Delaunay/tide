@@ -758,7 +758,7 @@ class BindingGenerator:
             return
 
         if name.spelling == 'NULL':
-            return None
+            return T.Assign([T.Name('NULL')], T.Name('None'))
 
         try:
             bods = {t.spelling for t in tok_body}
@@ -1027,7 +1027,6 @@ def generate_bindings():
 
     with open(os.path.join(dirname, '..', '..', 'output', 'sdl2.py'), 'w') as f:
         f.write("""import os\n""")
-        f.write("""from ctypes import *\n""")
         f.write("""from tide.runtime.loader import DLL\n""")
         f.write("""from tide.runtime.ctypes_ext import *\n""")
         f.write("""_lib = DLL("SDL2", ["SDL2", "SDL2-2.0"], os.getenv("PYSDL2_DLL_PATH"))\n""")

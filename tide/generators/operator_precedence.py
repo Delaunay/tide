@@ -210,8 +210,6 @@ class TokenParser:
         self.next()
         expr = self.parse_expression(depth + 1)
 
-        print(expr)
-
         # dereference
         if op.spelling == '&':
             return expr
