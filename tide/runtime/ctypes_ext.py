@@ -17,3 +17,8 @@ PRIu64 = "llu"
 PRIx64 = "I64x"
 PRIX64 = "I64X"
 PRIs64 = "lld"
+
+
+def enumeration(cls=None):
+    """Annotate the class as an enumeration because we could not use Enum"""
+    return cls

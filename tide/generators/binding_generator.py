@@ -325,6 +325,22 @@ class BindingGenerator:
     def generate_typeref(self, elem, **kwargs):
         return T.Name(elem.spelling)
 
+    @staticmethod
+    def run(include, guard=None):
+        import os
+
+        if guard is None:
+            guard = os.path.dirname(include)
+
+        index = clang.cindex.Index.create()
+        tu = index.parse(include, options=0x01)
+
+        for diag in tu.diagnostics:
+            log.debug(diag.format())
+
+        gen = BindingGenerator()
+        return gen.generate(tu, guard=guard)
+
     def generate_typedef(self, elem, **kwargs):
         """Generate a type alias
 
@@ -673,7 +689,12 @@ class BindingGenerator:
         return commonprefix(names)
 
     def generate_enum(self, elem: Cursor, depth=0, **kwargs):
-        """ Generate a enum
+        """ Generate a enum class
+
+        Notes
+        -----
+        we cannot use enum.Enum because we need the class to be a ctype/c_int when they are used
+        a arguments
 
         Examples
         --------
@@ -682,7 +703,8 @@ class BindingGenerator:
         >>> module = BindingGenerator().generate(tu)
         >>> print(compact(unparse(module)))
         <BLANKLINE>
-        class Colors(Enum):
+        @enumeration
+        class Colors(c_int):
             Red = 0
             Green = 1
             Blue = 2
@@ -732,6 +754,7 @@ class BindingGenerator:
             self.import_enum = True
             enum_class = T.ClassDef(name, bases=[ctypes])
             enum_class.body = enum
+            enum_class.decorator_list.append(T.Name('enumeration'))
             return enum_class
 
         return enum
@@ -849,7 +872,7 @@ class BindingGenerator:
         except UnsupportedExpression:
             self.unsupported_macros.add(name.spelling)
             body = [b.spelling for b in tok_body]
-            log.warning(f'Unsupported expression, cannot transform macro {name} {"".join(body)}')
+            log.warning(f'Unsupported expression, cannot transform macro {name.spelling} {"".join(body)}')
             return
 
         name = name.spelling
@@ -1075,6 +1098,7 @@ class BindingGenerator:
                             module.body.append(T.Expr(e))
                     else:
                         module.body.append(T.Expr(expr))
+
             except Unsupported:
                 log.debug(elem)
                 pass
@@ -1082,38 +1106,25 @@ class BindingGenerator:
         return module
 
 
-def generate_bindings():
-    import sys
-    logging.basicConfig(stream=sys.stdout)
-    log.setLevel(logging.DEBUG)
-
-    index = clang.cindex.Index.create()
-    file = '/usr/include/SDL2/SDL.h'
-    # file = '/home/setepenre/work/tide/tests/binding/typedef_func.h'
-    # file = '/home/setepenre/work/tide/tests/binding/nested_struct.h'
-    tu = index.parse(file, options=0x01)
-
-    for diag in tu.diagnostics:
-        log.debug(diag.format())
-
-    gen = BindingGenerator()
-    module = gen.generate(tu, guard='/usr/include/SDL2')
-
-    log.debug('=' * 80)
-
+def generate_bindings(module):
+    """Unparse a Python module containing the bindings"""
     import os
+
     dirname = os.path.dirname(__file__)
 
     with open(os.path.join(dirname, '..', '..', 'output', 'sdl2.py'), 'w') as f:
         f.write("""import os\n""")
-        # if gen.import_enum:
-        #    f.write("""from enum import Enum\n""")
         f.write("""\n""")
         f.write("""from tide.runtime.loader import DLL\n""")
         f.write("""from tide.runtime.ctypes_ext import *\n""")
         f.write("""_lib = DLL("SDL2", ["SDL2", "SDL2-2.0"], os.getenv("PYSDL2_DLL_PATH"))\n""")
         f.write("""_bind = _lib.bind_function\n""")
         f.write(unparse(module))
+
+
+def generate_sdl2_bindings():
+    bindings = BindingGenerator.run('/usr/include/SDL2/SDL.h')
+    generate_bindings(bindings)
 
 
 if __name__ == '__main__':
@@ -1123,26 +1134,9 @@ if __name__ == '__main__':
     logging.basicConfig(stream=sys.stdout)
     log.setLevel(logging.DEBUG)
 
-    generate_bindings()
+    generate_sdl2_bindings()
 
     from tide.generators.clang_utils import parse_clang
     tu, index = parse_clang('float add(float a, float b);')
     module = BindingGenerator().generate(tu)
     print(compact(unparse(module)))
-
-    # from tide.generators.clang_utils import parse_clang
-    #
-    # tu, index = parse_clang('#define PI 3.14')
-    #
-    # for diag in tu.diagnostics:
-    #     print(diag.format())
-    #
-    # print(list(tu.cursor.get_children()))
-    #
-    # for i in list(tu.cursor.get_children()):
-    #     print(i.kind)
-    #
-    # module = BindingGenerator().generate(tu)
-    #
-    # print(unparse(module))
-

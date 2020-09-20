@@ -5,9 +5,8 @@ from clang.cindex import Token, TokenKind
 import tide.generators.nodes as T
 from tide.generators.debug import show_elem, d
 
-
 log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+
 
 LeftToRight = 1
 RightToLeft = 2
@@ -334,6 +333,8 @@ class TokenParser:
 
     unsupported_keywords = {
         '__asm__',
+        # those should become decorator
+        # we should try to lose as little as possible when converting between language
         '__attribute__',
         '__inline__',
         '__FILE__',
