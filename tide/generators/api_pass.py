@@ -23,6 +23,12 @@ def parse_sdl_name(name):
 
     >>> parse_sdl_name('SDL_GetIndexRLE')
     ('SDL', ['get', 'index', 'RLE'])
+
+    >>> parse_sdl_name('SDL_GL_BindTexture')
+    ('SDL', ['GL', 'bind', 'texture'])
+
+    >>> parse_sdl_name('SDL_GLprofile')
+    ('SDL', ['GL', 'profile'])
     """
     # <module>_CamelCase
     try:
@@ -39,16 +45,28 @@ def parse_sdl_name(name):
     c: str
 
     for i, c in enumerate(name):
+        # handles GL_Bind
         if c == '_':
+            if not all_upper:
+                buffer = buffer.lower()
+
+            names.append(buffer)
+            buffer = ''
+            all_upper = False
             continue
 
         if c.isupper():
             if buffer and not all_upper:
                 names.append(buffer.lower())
                 buffer = ''
-                all_upper = True
 
             buffer += c
+            all_upper = True
+
+        # handles: GLprofile
+        elif len(buffer) > 1 and all_upper:
+            names.append(buffer)
+            buffer = c
         else:
             buffer += c
             all_upper = False
@@ -62,12 +80,24 @@ def parse_sdl_name(name):
     return module, names
 
 
+def capitalize(s: str) -> str:
+    if s.isupper():
+        return s
+    return s.capitalize()
+
+
 def class_name(*names):
-    return ''.join([n.capitalize() for n in names])
+    return ''.join([capitalize(n) for n in names])
+
+
+def lower(s: str) -> str:
+    if s.isupper():
+        return s
+    return s.lower()
 
 
 def function_name(*names):
-    return '_'.join([n.lower() for n in names])
+    return '_'.join([lower(n) for n in names])
 
 
 def match(value, type, *expr):
@@ -99,7 +129,11 @@ class APIPass:
         }
         self.ctypes = dict()
         self.wrappers = dict()
+        # keep the order to know if we can annotate with Name of with string
+        self.wrapper_order = dict()
         self.names = Trie()
+        self.rename_types = dict()
+        self.current_class_name = None
 
     def class_definition(self, class_def: T.ClassDef, depth):
         self.ctypes[class_def.name] = class_def
@@ -108,17 +142,49 @@ class APIPass:
         if self_wrap is None:
             _, names = parse_sdl_name(class_def.name)
 
-            self_wrap = T.ClassDef(class_name(*names))
+            cl_name = class_name(*names)
+            self_wrap = T.ClassDef(cl_name)
             self.wrappers[class_def.name] = self_wrap
+            self.wrapper_order[self_wrap.name] = len(self.wrappers)
+
             self_wrap.body.append(T.AnnAssign(T.Name('handle'), T.Name(class_def.name), None))
+
+            # Factory to build the wrapper form the ctype
+            from_ctype = T.FunctionDef('from_handle', decorator_list=[T.Name('staticmethod')])
+            from_ctype.args = T.Arguments(args=[T.Arg('a', T.Name(class_def.name))])
+            from_ctype.returns = T.Constant(cl_name)
+            from_ctype.body = [
+                T.Assign([T.Name('b')], T.Call(T.Name(cl_name))),
+                T.Assign([T.Attribute(T.Name('b'), 'handle')], T.Name('a')),
+                T.Return(T.Name('b'))
+            ]
+
+            self_wrap.body.append(from_ctype)
+            self.rename_types[T.Call(T.Name('POINTER'), [T.Name(class_def.name)])] = cl_name
 
         return class_def
 
     def function_definition(self, function_def: T.FunctionDef, depth):
         return function_def
 
-    SELF = T.Attribute(T.Name('self'), 'handle')
+    SELF_HANDLE = T.Attribute(T.Name('self'), 'handle')
     ARGS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.lower()
+
+    def rename(self, n):
+        new_name = self.rename_types.get(n, None)
+        if new_name:
+            arg_type_order = self.wrapper_order.get(new_name, None)
+            class_order = self.wrapper_order.get(self.current_class_name, None)
+
+            # arg type is defined after current class
+            if arg_type_order and class_order and arg_type_order > class_order:
+                return T.Constant(new_name)
+
+            if new_name == self.current_class_name:
+                return T.Constant(new_name)
+
+            return T.Name(new_name)
+        return n
 
     def process_bind_call(self, call: T.Call, parent):
         fun_name = call.args[0].s
@@ -151,14 +217,16 @@ class APIPass:
 
         _, names = parse_sdl_name(fun_name)
         ctype_args = list(ctype_args.elts[1:])
+        self.current_class_name = self_wrap.name
 
         new_fun = T.FunctionDef(function_name(*names))
-        new_fun.args = T.Arguments(args=[T.Arg('self')] + [T.Arg(n, t) for n, t in zip(self.ARGS, ctype_args)])
+        new_fun.args = T.Arguments(args=[T.Arg('self')] + [T.Arg(n, self.rename(t)) for n, t in zip(self.ARGS, ctype_args)])
         new_fun.body.append(
-            T.Return(T.Call(T.Name(fun_name), [self.SELF] + [T.Name(self.ARGS[i]) for i in range(len(ctype_args))]))
+            T.Return(T.Call(T.Name(fun_name), [self.SELF_HANDLE] + [T.Name(self.ARGS[i]) for i in range(len(ctype_args))]))
         )
-        new_fun.returns = ctype_return
+        new_fun.returns = self.rename(ctype_return)
         self_wrap.body.append(new_fun)
+        self.current_class_name = None
 
         # We are ready to move our function from
         # print(object_type)
