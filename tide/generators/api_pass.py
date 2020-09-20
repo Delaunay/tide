@@ -16,6 +16,58 @@ acronyms_db.insert('GL')
 acronyms_db.insert('RLE')   # Run Length Encoding
 
 
+def split_on_case_change(name: str, separators=None):
+    """
+
+    Examples
+    --------
+    >>> split_on_case_change('SDL_GetIndex', {'_'})
+    ['SDL', 'G', 'et', 'I', 'ndex']
+
+    >>> split_on_case_change('SDL_GetIndexRLE', {'_'})
+    ['SDL', 'G', 'et', 'I', 'ndex', 'RLE']
+
+    >>> split_on_case_change('SDL_GL_BindTexture', {'_'})
+    ['SDL', 'GL', 'B', 'ind', 'T', 'exture']
+
+    >>> split_on_case_change('SDL_GLprofile', {'_'})
+    ['SDL', 'GL', 'profile']
+
+    >>> split_on_case_change('SDL_UpdateYUVTexture', {'_'})
+    ['SDL', 'U', 'pdate', 'YUVT', 'exture']
+    """
+    is_lower = name[0].islower()
+    buffer = ''
+    result = []
+
+    if separators is None:
+        separators = set()
+
+    i = 0
+    while i < len(name):
+        n = name[i]
+
+        if n in separators:
+            result.append(buffer)
+            buffer = name[i + 1]
+            is_lower = name[i + 1].islower()
+            i += 2
+            continue
+        elif is_lower is n.islower():
+            buffer += n
+            i += 1
+        else:
+            result.append(buffer)
+            buffer = name[i]
+            is_lower = name[i].islower()
+            i += 1
+
+    if buffer:
+        result.append(buffer)
+
+    return result
+
+
 def parse_sdl_name(name):
     """Parse SDL naming convention and explode it by components
 
@@ -32,6 +84,10 @@ def parse_sdl_name(name):
 
     >>> parse_sdl_name('SDL_GLprofile')
     ('SDL', ['GL', 'profile'])
+
+    This case is problematic
+    >>> parse_sdl_name('SDL_UpdateYUVTexture')
+    ('SDL', ['update', 'YUVT', 'exture'])
     """
     # <module>_CamelCase
     try:
