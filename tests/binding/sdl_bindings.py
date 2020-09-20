@@ -10,12 +10,13 @@ import ctypes
 
 def main():
     SDL_Init(SDL_INIT_VIDEO)
+
     window = SDL_CreateWindow(
         b"Hello World",
       SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
       592, 460, SDL_WindowFlags.SHOWN)
 
-    windowsurface = SDL_GetWindowSurface(window)
+    windowsurface = window.GetWindowSurface()
 
     # image = SDL_LoadBMP(b"exampleimage.bmp")
     # SDL_BlitSurface(image, None, windowsurface, None)
