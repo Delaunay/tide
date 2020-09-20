@@ -1,6 +1,9 @@
-import logging
-
 import ast
+from collections import defaultdict
+import copy
+import logging
+from typing import List
+
 import tide.generators.nodes as T
 from tide.generators.debug import d
 from tide.utils.trie import Trie
@@ -129,8 +132,12 @@ class APIPass:
         }
         self.ctypes = dict()
         self.wrappers = dict()
+        self.wrappers_2_ctypes = dict()
         # keep the order to know if we can annotate with Name of with string
         self.wrapper_order = dict()
+        # we will remove wrappers that do not have methods
+        # i.e they are data struct only
+        self.wrapper_method_count = defaultdict(int)
         self.names = Trie()
         self.rename_types = dict()
         self.current_class_name = None
@@ -138,23 +145,32 @@ class APIPass:
     def class_definition(self, class_def: T.ClassDef, depth):
         self.ctypes[class_def.name] = class_def
 
+        # Opaque struct: move on
+        if class_def.name[0] == '_':
+            return class_def
+
         self_wrap = self.wrappers.get(class_def.name)
         if self_wrap is None:
+            if T.Name('enumeration') in class_def.decorator_list:
+                return class_def
+
             _, names = parse_sdl_name(class_def.name)
 
             cl_name = class_name(*names)
             self_wrap = T.ClassDef(cl_name)
             self.wrappers[class_def.name] = self_wrap
+            self.wrappers_2_ctypes[self_wrap.name] = class_def.name
             self.wrapper_order[self_wrap.name] = len(self.wrappers)
 
-            self_wrap.body.append(T.AnnAssign(T.Name('handle'), T.Name(class_def.name), None))
+            self_wrap.body.append(T.AnnAssign(T.Name('handle'), T.Name(class_def.name), T.Name('None')))
 
             # Factory to build the wrapper form the ctype
+            # create an uninitialized version of the object and set the handle
             from_ctype = T.FunctionDef('from_handle', decorator_list=[T.Name('staticmethod')])
             from_ctype.args = T.Arguments(args=[T.Arg('a', T.Name(class_def.name))])
             from_ctype.returns = T.Constant(cl_name)
             from_ctype.body = [
-                T.Assign([T.Name('b')], T.Call(T.Name(cl_name))),
+                T.Assign([T.Name('b')], T.Call(T.Attribute(T.Name('object'), '__new__'), [T.Name(cl_name)])),
                 T.Assign([T.Attribute(T.Name('b'), 'handle')], T.Name('a')),
                 T.Return(T.Name('b'))
             ]
@@ -220,17 +236,56 @@ class APIPass:
         self.current_class_name = self_wrap.name
 
         new_fun = T.FunctionDef(function_name(*names))
-        new_fun.args = T.Arguments(args=[T.Arg('self')] + [T.Arg(n, self.rename(t)) for n, t in zip(self.ARGS, ctype_args)])
-        new_fun.body.append(
-            T.Return(T.Call(T.Name(fun_name), [self.SELF_HANDLE] + [T.Name(self.ARGS[i]) for i in range(len(ctype_args))]))
-        )
         new_fun.returns = self.rename(ctype_return)
+
+        # we need to convert the result to our new class
+        ccall = T.Call(T.Name(fun_name), [self.SELF_HANDLE] + [T.Name(self.ARGS[i]) for i in range(len(ctype_args))])
+
+        if new_fun.returns != ctype_return:
+            cast_to = new_fun.returns
+
+            if isinstance(new_fun.returns, T.Constant):
+                cast_to = T.Name(new_fun.returns.value)
+
+            ccall = T.Call(T.Attribute(cast_to, 'from_handle'), [ccall])
+
+        new_fun.args = T.Arguments(args=[T.Arg('self')] + [T.Arg(n, self.rename(t)) for n, t in zip(self.ARGS, ctype_args)])
+        new_fun.body = [
+            # self.handle_is_not_none,
+            T.Return(ccall)
+        ]
         self_wrap.body.append(new_fun)
+
+        # try to find destructor and constructor functions
+        for i, n in enumerate(names):
+            arg_n = len(new_fun.args.args)
+
+            # check if the function is named destroy + class_name
+            if arg_n == 1 and n == 'destroy' and i + 2 == len(names) and names[i + 1] == self_wrap.name.lower():
+                destructor = copy.deepcopy(new_fun)
+                destructor.name = '__del__'
+                self_wrap.body.append(destructor)
+                break
+
+            # sdl is not consistent with that one
+            if n == 'free':
+                destructor = copy.deepcopy(new_fun)
+                destructor.name = '__del__'
+                self_wrap.body.append(destructor)
+
+
+        self.wrapper_method_count[self.current_class_name] += 1
         self.current_class_name = None
 
         # We are ready to move our function from
         # print(object_type)
         return parent
+
+    handle_is_not_none = T.Assert(
+        test=T.Compare(
+            left=T.Attribute(value=T.Name(id='self', ctx=T.Load()), attr='handle', ctx=T.Load()),
+            ops=[T.IsNot()],
+            comparators=[T.Constant(value=None, kind=None)]), msg=None)
 
     def assign(self, expr: T.Assign, depth):
         if match(expr.value, 'Call', ('func', 'Name')) and expr.value.func.id == '_bind':
@@ -254,7 +309,15 @@ class APIPass:
 
         # insert our new bindings at the end
         for k, v in self.wrappers.items():
-            module.body.append(v)
+            if isinstance(v, T.ClassDef):
+                if self.wrapper_method_count.get(v.name, 0) > 0:
+                    module.body.append(v)
+
+                elif v.name in self.wrappers_2_ctypes:
+                    c_struct = self.wrappers_2_ctypes.get(v.name)
+                    # make it an alias for the ctype
+                    module.body.append(T.Expr(T.Assign([T.Name(v.name)], T.Name(c_struct))))
+
         return module
 
     def dispatch(self, expr, depth) -> T.Expr:

@@ -348,11 +348,11 @@ class Try(Statement):
 @dataclass
 class Assert(Statement):
     test: Expression
-    msg: Optional[Expression]
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+    msg: Optional[Expression] = None
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
 
 
 #  stmt Constructor(Import, [Field(alias, names, seq=True)])

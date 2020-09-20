@@ -154,7 +154,7 @@ if __name__ == '__main__':
 
     mod = ast.parse("""
 a = 1
-
+assert self.handle is not None
 if a and 2:
     pass
 """)
