@@ -189,6 +189,34 @@ def match(value, type, *expr):
     return True
 
 
+RESERVED_KEYWORDS = {
+    'raise'
+}
+
+
+def clean_name(original_name, to_remove):
+    if original_name.startswith('__'):
+        return original_name
+
+    name = (original_name.replace(to_remove, '')
+                .replace('__', '_'))
+
+    s = 0
+    if name[0] == '_':
+        s = 1
+
+    e = len(name)
+    if name[-1] == '_':
+        e = -1
+
+    new_name = name[s:e]
+
+    if new_name in RESERVED_KEYWORDS:
+        return original_name
+
+    return new_name
+
+
 class APIPass:
     """Generate a more friendly API for C bindings"""
     def __init__(self):
@@ -209,6 +237,42 @@ class APIPass:
         self.names = Trie()
         self.rename_types = dict()
         self.current_class_name = None
+
+    def post_process_class_defintion(self, class_def: T.ClassDef):
+        """Make a final pass over the generated class to improve function names"""
+
+        class_name = class_def.name.lower()
+        names = defaultdict(int)
+
+        for expr in class_def.body:
+            if not isinstance(expr, T.FunctionDef):
+                continue
+
+            for n in expr.name.split('_'):
+                if len(n) > 0:
+                    names[n] += 1
+
+        names = list(names.items())
+
+        # remove names that are not used that often
+        names = sorted(filter(lambda x: x[1] > 2, names), key=lambda x: x[1])
+
+        # this is the magic filter that makes thing work
+        # by forcing the name we are removing to be part of the type name
+        # we are almost sure to remove duplicated data that is not useful
+        # even when it appears multiple times it can make sense to have it duplicated
+        # Example:
+        #   read_le16, read_le32, read_le64
+        #   write_le16, write_le32, write_le64
+
+        names = list(map(lambda x: x[0], filter(lambda x: x[0] in class_name, names)))
+
+        for expr in class_def.body:
+            if not isinstance(expr, T.FunctionDef):
+                continue
+
+            for useless_name in names:
+                expr.name = clean_name(expr.name, useless_name)
 
     def class_definition(self, class_def: T.ClassDef, depth):
         self.ctypes[class_def.name] = class_def
@@ -321,10 +385,6 @@ class APIPass:
 
             # we need to convert the result to our new class
             ccall = T.Call(T.Name(fun_name), [self.SELF_HANDLE] + [T.Name(self.ARGS[i]) for i in range(len(ctype_args))])
-            new_fun.body = [
-                # self.handle_is_not_none,
-                T.Return(ccall)
-            ]
 
             # does the return type need to be wrapped
             if new_fun.returns != ctype_return:
@@ -333,10 +393,12 @@ class APIPass:
                 if isinstance(new_fun.returns, T.Constant):
                     cast_to = T.Name(new_fun.returns.value)
 
-                new_fun.body = [
-                    # self.handle_is_not_none,
-                    T.Return(T.Call(T.Attribute(cast_to, 'from_handle'), [ccall]))
-                ]
+                ccall = T.Call(T.Attribute(cast_to, 'from_handle'), [ccall])
+
+            new_fun.body = [
+                # self.handle_is_not_none,
+                T.Return(ccall)
+            ]
 
         self_wrap.body.append(new_fun)
 
@@ -394,6 +456,7 @@ class APIPass:
         for k, v in self.wrappers.items():
             if isinstance(v, T.ClassDef):
                 if self.wrapper_method_count.get(v.name, 0) > 0:
+                    self.post_process_class_defintion(v)
                     module.body.append(v)
 
                 elif v.name in self.wrappers_2_ctypes:

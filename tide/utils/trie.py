@@ -7,6 +7,9 @@ class Trie:
     def __init__(self):
         self.chars = defaultdict(Trie)
         self.leaf = False
+        # used to tokenize words further
+        # this is used so redundant_prefix does not cut full words in half
+        self.alphanum_boundary = False
         # count the number of leaves downstream
         self.count = 0
 
@@ -57,14 +60,17 @@ class Trie:
         for n in names:
             self._insert(n)
 
-    def _insert(self, name: str) -> None:
+    def _insert(self, name: str, previous_char=None) -> None:
         self.count += 1
 
         if name == '':
             self.leaf = True
             return
 
-        self.chars[name[0]].insert(name[1:])
+        if previous_char and not previous_char.isalnum():
+            self.alphanum_boundary = True
+
+        self.chars[name[0]]._insert(name[1:], previous_char=name[0])
 
     def words(self) -> Iterable[str]:
         """Returns all possible words after that point
@@ -149,9 +155,54 @@ class Trie:
                 for b in buckets:
                     yield b
 
+    def redundant_prefix(self):
+        """Show how often a prefix is reused
+
+        Issues
+        ------
+        Does not split after full word, can cut words in half
+
+        Examples
+        --------
+        >>> names = Trie()
+        >>> names.insert(
+        ...     'SDL_BUTTON_LMASK',
+        ...     'SDL_BUTTON_MMASK',
+        ...     'SDL_BUTTON_RMASK',
+        ...     'SDL_HAT_UP',
+        ...     'SDL_HAT_RIGHT',
+        ...     'read_le16',
+        ...     'read_le32',
+        ... )
+        >>> sorted(list(names.redundant_prefix()), key=lambda x: x[1])
+        [(3, 'SDL_BUTTON_'), (2, 'SDL_HAT_'), (2, 'read_')]
+        """
+        counts = dict()
+        for w in set(self._redundant_prefix()):
+            trie = self.find(w)
+            counts[w] = trie.count
+
+        for w, c in counts.items():
+            if c > 1 and len(w) > 2:
+                yield c, w
+
+    def _redundant_prefix(self, previous_count=None):
+        for c, t in self.chars.items():
+            if (previous_count and t.count == previous_count) or t.count > 1:
+                words = list(self.chars[c]._redundant_prefix(previous_count))
+
+                for w in words:
+                    yield c + w
+
+                if len(words) == 0 and self.alphanum_boundary:
+                    yield ''
+
+            elif self.alphanum_boundary:
+                yield ''
+
     def dumps(self, d=0, c=''):
         i = ' ' * d
-        print(f'|{i} `{c}` (bucket: {self.is_bucket()}) (count: {self.count}) (len: {len(self.chars)})')
+        print(f'|{i} `{c}` (bucket: {self.is_bucket()}) (count: {self.count}) (len: {len(self.chars)}) (boundary: {self.alphanum_boundary})')
 
         for c, t in self.chars.items():
             t.dumps(d + 1, c)
