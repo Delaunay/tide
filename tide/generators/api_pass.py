@@ -14,6 +14,12 @@ log = logging.getLogger('API')
 acronyms_db = Trie()
 acronyms_db.insert('GL')
 acronyms_db.insert('RLE')   # Run Length Encoding
+acronyms_db.insert('YUV')   # Luma, Blue, Red
+
+
+def get_ast(code):
+    mod: T.Module = ast.parse(code)
+    return mod.body[0]
 
 
 def split_on_case_change(name: str, separators=None):
@@ -87,7 +93,7 @@ def parse_sdl_name(name):
 
     This case is problematic
     >>> parse_sdl_name('SDL_UpdateYUVTexture')
-    ('SDL', ['update', 'YUVT', 'exture'])
+    ('SDL', ['update', 'YUV', 'texture'])
     """
     # <module>_CamelCase
     try:
@@ -119,11 +125,17 @@ def parse_sdl_name(name):
                 names.append(buffer.lower())
                 buffer = ''
 
+            # YUVT handling, stop when the acronym is full
+            trie = acronyms_db.find(buffer)
+            if all_upper and trie and trie.leaf:
+                names.append(buffer)
+                buffer = ''
+
             buffer += c
             all_upper = True
 
         # handles: GLprofile
-        elif len(buffer) > 1 and all_upper:
+        elif c.islower() and len(buffer) > 1 and all_upper:
             names.append(buffer)
             buffer = c
         else:
@@ -291,25 +303,41 @@ class APIPass:
         ctype_args = list(ctype_args.elts[1:])
         self.current_class_name = self_wrap.name
 
-        new_fun = T.FunctionDef(function_name(*names))
-        new_fun.returns = self.rename(ctype_return)
+        # is this a accessor get_something(pointer)
+        if 'get' in names and len(ctype_args) == 1 and match(ctype_args[0], 'Call', ('func', 'Name')) and ctype_args[0].func.id == 'POINTER':
+            # Pointer(TYPE)
+            access_type = ctype_args[0].args[0].id
 
-        # we need to convert the result to our new class
-        ccall = T.Call(T.Name(fun_name), [self.SELF_HANDLE] + [T.Name(self.ARGS[i]) for i in range(len(ctype_args))])
+            new_fun = get_ast(f"""
+            |def {function_name(*names)}(self) -> {access_type}:
+            |    result = {access_type}()
+            |    error = {fun_name}(self.handle, byref(result));
+            |    return result
+            |""".replace('            |', ''))
+        else:
+            new_fun = T.FunctionDef(function_name(*names))
+            new_fun.returns = self.rename(ctype_return)
+            new_fun.args = T.Arguments(args=[T.Arg('self')] + [T.Arg(n, self.rename(t)) for n, t in zip(self.ARGS, ctype_args)])
 
-        if new_fun.returns != ctype_return:
-            cast_to = new_fun.returns
+            # we need to convert the result to our new class
+            ccall = T.Call(T.Name(fun_name), [self.SELF_HANDLE] + [T.Name(self.ARGS[i]) for i in range(len(ctype_args))])
+            new_fun.body = [
+                # self.handle_is_not_none,
+                T.Return(ccall)
+            ]
 
-            if isinstance(new_fun.returns, T.Constant):
-                cast_to = T.Name(new_fun.returns.value)
+            # does the return type need to be wrapped
+            if new_fun.returns != ctype_return:
+                cast_to = new_fun.returns
 
-            ccall = T.Call(T.Attribute(cast_to, 'from_handle'), [ccall])
+                if isinstance(new_fun.returns, T.Constant):
+                    cast_to = T.Name(new_fun.returns.value)
 
-        new_fun.args = T.Arguments(args=[T.Arg('self')] + [T.Arg(n, self.rename(t)) for n, t in zip(self.ARGS, ctype_args)])
-        new_fun.body = [
-            # self.handle_is_not_none,
-            T.Return(ccall)
-        ]
+                new_fun.body = [
+                    # self.handle_is_not_none,
+                    T.Return(T.Call(T.Attribute(cast_to, 'from_handle'), [ccall]))
+                ]
+
         self_wrap.body.append(new_fun)
 
         # try to find destructor and constructor functions
@@ -328,7 +356,6 @@ class APIPass:
                 destructor = copy.deepcopy(new_fun)
                 destructor.name = '__del__'
                 self_wrap.body.append(destructor)
-
 
         self.wrapper_method_count[self.current_class_name] += 1
         self.current_class_name = None
