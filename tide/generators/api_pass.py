@@ -2,9 +2,11 @@ import ast
 from collections import defaultdict
 import copy
 import logging
+import re
 from typing import List
 
 import tide.generators.nodes as T
+from tide.generators.binding_generator import c_identifier
 from tide.generators.debug import d
 from tide.utils.trie import Trie
 
@@ -199,7 +201,7 @@ def clean_name(original_name, to_remove):
         return original_name
 
     name = (original_name.replace(to_remove, '')
-                .replace('__', '_'))
+                         .replace('__', '_'))
 
     s = 0
     if name[0] == '_':
@@ -210,6 +212,9 @@ def clean_name(original_name, to_remove):
         e = -1
 
     new_name = name[s:e]
+
+    if not re.match(c_identifier, new_name):
+        return original_name
 
     if new_name in RESERVED_KEYWORDS:
         return original_name
@@ -234,6 +239,7 @@ class APIPass:
         # we will remove wrappers that do not have methods
         # i.e they are data struct only
         self.wrapper_method_count = defaultdict(int)
+        self.new_code = []
         self.names = Trie()
         self.rename_types = dict()
         self.current_class_name = None
@@ -274,6 +280,60 @@ class APIPass:
             for useless_name in names:
                 expr.name = clean_name(expr.name, useless_name)
 
+    def group_constant_to_enums(self):
+        pass
+
+    def clean_up_enumeration(self, class_def: T.ClassDef):
+        _, names = parse_sdl_name(class_def.name)
+        cl_name = class_name(*names)
+
+        # make a short alias of the enum (without the hardcoded c namespace)
+        if cl_name != class_def.name:
+            self.new_code.append((None, T.Assign([T.Name(cl_name)], T.Name(class_def.name))))
+
+        t = Trie()
+        counts = 0
+        for expr in class_def.body:
+            if match(expr, 'Assign') and match(expr.targets[0], 'Name'):
+                constant_name = expr.targets[0].id
+                t.insert(constant_name)
+                counts += 1
+
+        _ = list(t.redundant_prefix())
+        if len(_) > 1:
+            # select the shortest prefix that is common to all
+            most_likely = _[0]
+            for c, n in _:
+
+                if len(n) < len(most_likely[1]):
+                    most_likely = (c, n)
+
+            # check that the prefix is common to all
+            good = True
+            for c, n in _:
+                if not most_likely[1] in n:
+                    good = False
+                    break
+
+            if good:
+                _ = [most_likely]
+            else:
+                _ = []
+
+        if len(_) == 1:
+            c, namespace = _[0]
+
+            # SDL insert a None/Max enum that does not follow the pattern
+            if counts != c + 1:
+                return class_def
+
+            for expr in class_def.body:
+                if match(expr, 'Assign') and match(expr.targets[0], 'Name'):
+                    constant_name = expr.targets[0].id
+                    expr.targets[0].id = clean_name(constant_name, namespace)
+
+        return class_def
+
     def class_definition(self, class_def: T.ClassDef, depth):
         self.ctypes[class_def.name] = class_def
 
@@ -284,12 +344,13 @@ class APIPass:
         self_wrap = self.wrappers.get(class_def.name)
         if self_wrap is None:
             if T.Name('enumeration') in class_def.decorator_list:
-                return class_def
+                return self.clean_up_enumeration(class_def)
 
             _, names = parse_sdl_name(class_def.name)
 
             cl_name = class_name(*names)
             self_wrap = T.ClassDef(cl_name)
+            self.new_code.append((class_def.name, self_wrap))
             self.wrappers[class_def.name] = self_wrap
             self.wrappers_2_ctypes[self_wrap.name] = class_def.name
             self.wrapper_order[self_wrap.name] = len(self.wrappers)
@@ -453,7 +514,7 @@ class APIPass:
             self.dispatch(expr, depth + 1)
 
         # insert our new bindings at the end
-        for k, v in self.wrappers.items():
+        for k, v in self.new_code:
             if isinstance(v, T.ClassDef):
                 if self.wrapper_method_count.get(v.name, 0) > 0:
                     self.post_process_class_defintion(v)
@@ -463,6 +524,8 @@ class APIPass:
                     c_struct = self.wrappers_2_ctypes.get(v.name)
                     # make it an alias for the ctype
                     module.body.append(T.Expr(T.Assign([T.Name(v.name)], T.Name(c_struct))))
+            else:
+                module.body.append(T.Expr(v))
 
         return module
 
