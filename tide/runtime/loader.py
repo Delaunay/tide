@@ -118,7 +118,7 @@ class DLL(object):
         if path is not None and sys.platform in ("win32",) and path in self._libfile:
             os.environ["PATH"] = "%s;%s" % (path, os.environ["PATH"])
 
-    def bind_function(self, funcname, args=None, returns=None):
+    def bind_function(self, funcname, args=None, returns=None, **kwargs):
         """Binds the passed argument and return value types to the specified
         function. If the version of the loaded library is older than the
         version where the function was added, an informative exception will
@@ -132,6 +132,8 @@ class DLL(object):
                 be 'None' if function returns 'void'.
             added (str, optional): The version of the library in which the
                 function was added, in the format '2.x.x'.
+
+            kwargs (dict): used to hold arbitrary data from the c-binding generator
         """
         func = getattr(self._dll, funcname, None)
 

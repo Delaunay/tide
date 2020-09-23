@@ -153,6 +153,14 @@ def parse_sdl_name(name):
     return module, names
 
 
+def get_kwarg_arg(name, kwargs: List[T.Keyword], default):
+    for kwarg in kwargs:
+        if kwarg.arg == name:
+            return kwarg.value
+
+    return default
+
+
 def capitalize(s: str) -> str:
     if s.isupper():
         return s
@@ -223,7 +231,19 @@ def clean_name(original_name, to_remove):
 
 
 class APIPass:
-    """Generate a more friendly API for C bindings"""
+    """Generate a more friendly API for C bindings
+
+    Notes
+    -----
+    * removes the explicit library namespace from the name of functions and struct
+    * Rewrites functions as method if first argument is a pointer to struct
+    * Method use original c argument names
+    * Method has the origin c docstring
+    * Method has a short name removing the object name and the library namespace
+    * enum values are now scoped inside an enum class
+    * enum values have shorter names since name clashing cannot happen anymore
+
+    """
     def __init__(self):
         self.dispatcher = {
             'Expr': self.expression,
@@ -409,6 +429,18 @@ class APIPass:
         self_name = None
         self_arg: T.Call = ctype_args.elts[0]
 
+        arg_names = get_kwarg_arg('arg_names', call.keywords, None)
+        docstring = get_kwarg_arg('docstring', call.keywords, '')
+
+        # the data is now duplicated in our better api
+        # we can just remove it
+        call.keywords = []
+
+        if arg_names is not None:
+            arg_names = [a.value.lower() for a in arg_names.elts]
+        else:
+            arg_names = self.ARGS
+
         # Extract the self type
         # SDL_RenderSetLogicalSize = _bind('SDL_RenderSetLogicalSize', [POINTER(SDL_Renderer), c_int, c_int], c_int)
         #                                                                       ^~~~~~~~~~~^
@@ -426,7 +458,11 @@ class APIPass:
 
         _, names = parse_sdl_name(fun_name)
         ctype_args = list(ctype_args.elts[1:])
+        arg_names = list(arg_names[1:])
         self.current_class_name = self_wrap.name
+
+        if docstring:
+            docstring.value = docstring.value.replace('\n    ',  '\n        ')
 
         # is this a accessor get_something(pointer)
         if 'get' in names and len(ctype_args) == 1 and match(ctype_args[0], 'Call', ('func', 'Name')) and ctype_args[0].func.id == 'POINTER':
@@ -439,13 +475,16 @@ class APIPass:
             |    error = {fun_name}(self.handle, byref(result));
             |    return result
             |""".replace('            |', ''))
+
+            if docstring:
+                new_fun.body.insert(0, T.Expr(docstring))
         else:
             new_fun = T.FunctionDef(function_name(*names))
             new_fun.returns = self.rename(ctype_return)
-            new_fun.args = T.Arguments(args=[T.Arg('self')] + [T.Arg(n, self.rename(t)) for n, t in zip(self.ARGS, ctype_args)])
+            new_fun.args = T.Arguments(args=[T.Arg('self')] + [T.Arg(n, self.rename(t)) for n, t in zip(arg_names, ctype_args)])
 
             # we need to convert the result to our new class
-            ccall = T.Call(T.Name(fun_name), [self.SELF_HANDLE] + [T.Name(self.ARGS[i]) for i in range(len(ctype_args))])
+            ccall = T.Call(T.Name(fun_name), [self.SELF_HANDLE] + [T.Name(arg_names[i]) for i in range(len(ctype_args))])
 
             # does the return type need to be wrapped
             if new_fun.returns != ctype_return:
@@ -456,10 +495,10 @@ class APIPass:
 
                 ccall = T.Call(T.Attribute(cast_to, 'from_handle'), [ccall])
 
-            new_fun.body = [
-                # self.handle_is_not_none,
-                T.Return(ccall)
-            ]
+            new_fun.body = []
+            if docstring:
+                new_fun.body.append(T.Expr(docstring))
+            new_fun.body.append(T.Return(ccall))
 
         self_wrap.body.append(new_fun)
 

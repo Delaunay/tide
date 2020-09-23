@@ -6,11 +6,11 @@ import re
 from typing import List
 from os.path import commonprefix
 
-from astunparse import unparse, dump
+from astunparse import dump
 import clang.cindex
 from clang.cindex import Cursor, CursorKind, Type, SourceLocation, TypeKind, Token
 
-
+from tide.generators.unparser_patch import unparse
 from tide.generators.debug import show_elem, traverse, d
 from tide.generators.operator_precedence import is_operator, TokenParser, UnsupportedExpression
 import tide.generators.nodes as T
@@ -175,6 +175,30 @@ def parse_macro2(name, args, body: List[Token], definitions=None, registry=None,
     parser = TokenParser(body, definitions, registry, rename)
     expr = parser.parse_expression()
     return expr
+
+
+def reformat_comment(comment):
+    return (comment
+            # Beginning of comment
+            .replace('/**', '')
+            .replace('\\brief', '')
+            .replace('\\param', ':param')
+            .replace('\\sa', ':see')
+            .replace('\\return', ':return')
+            .replace('\\note', ':note')
+            # Start og paragraph
+            .replace(' *  ', '    ')
+            # End
+            .replace('*/', '').strip()
+            # Empty Line
+            .replace(' *', '    '))
+
+
+def get_comment(elem, indent='    '):
+    comment = ''
+    if elem.raw_comment:
+        comment = reformat_comment(elem.raw_comment)
+    return comment
 
 
 def sorted_children(cursor):
@@ -493,11 +517,15 @@ class BindingGenerator:
 
         rtype = self.generate_type(definition.result_type, depth + 1)
         args = definition.get_arguments()
+        docstring = get_comment(elem)
 
         pyargs = []
+        arg_names = []
         for a in args:
             atype = self.generate_type(a.type, depth + 1)
             pyargs.append(atype)
+            if a.spelling != '':
+                arg_names.append(T.Constant(a.spelling))
 
         funnane = definition.spelling
         if not pyargs:
@@ -505,7 +533,18 @@ class BindingGenerator:
         else:
             pyargs = T.List(elts=pyargs)
 
-        binding_call = T.Call(T.Name('_bind'), [T.Str(funnane), pyargs, rtype])
+        kwargs = []
+        if len(docstring) > 0:
+            kwargs.append(T.Keyword('docstring', T.Constant(docstring, docstring=True)))
+
+        if arg_names:
+            kwargs.append(T.Keyword('arg_names', T.List(arg_names)))
+
+        binding_call = T.Call(
+            T.Name('_bind'),
+            [T.Str(funnane), pyargs, rtype],
+            kwargs
+        )
         return T.Assign([T.Name(funnane)], binding_call)
 
     def get_name(self, elem, rename=None, depth=0):

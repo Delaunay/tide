@@ -82,10 +82,11 @@ Arguments = arguments
 
 #  keyword Product([Field(identifier, arg, opt=True), Field(expr, value)])
 @dataclass
-class Keyword:
+class keyword:
     arg: Optional[Identifier]
     value: Expression
 
+Keyword = keyword
 
 #  alias Product([Field(identifier, name), Field(identifier, asname, opt=True)])
 @dataclass
@@ -651,11 +652,12 @@ class FormattedValue(Expression):
 #  expr Constructor(JoinedStr, [Field(expr, values, seq=True)])
 @dataclass
 class JoinedStr(Expression):
-    values: ListT[Expression]
-    lineno: int
-    col_offset: int
-    end_lineno: Optional[int]
-    end_col_offset: Optional[int]
+    value: Optional[Expression] = None
+    values: ListT[Expression] = field(default_factory=list)
+    lineno: int = None
+    col_offset: int = None
+    end_lineno: Optional[int] = None
+    end_col_offset: Optional[int] = None
 
 
 #  expr Constructor(Constant, [Field(constant, value), Field(string, kind, opt=True)])
@@ -667,6 +669,7 @@ class Constant(Expression):
     col_offset: int = None
     end_lineno: Optional[int] = None
     end_col_offset: Optional[int] = None
+    docstring: bool = False
 
     def __hash__(self):
         return hash(self.value)

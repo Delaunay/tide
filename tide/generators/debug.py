@@ -148,16 +148,17 @@ def show_file(filename):
 
 if __name__ == '__main__':
     # show_file('/usr/include/SDL2/SDL.h')
+    from tide.generators.unparser_patch import unparse
+    import tide.generators.nodes as T
 
     import ast
-    from astunparse import unparse, dump
+    from astunparse import dump
 
     mod = ast.parse("""
-a = 1
-assert self.handle is not None
-if a and 2:
-    pass
+\"\"\"test\"\"\"
 """)
 
-    print(dump(mod))
+    mod = T.Constant("abc", docstring=True)
+
+    # print(dump(mod))
     print(unparse(mod))
