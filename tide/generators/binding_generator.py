@@ -546,7 +546,7 @@ class BindingGenerator:
 
         binding_call = T.Call(
             T.Name('_bind'),
-            [T.Str(funnane), pyargs, rtype],
+            [T.Constant(funnane), pyargs, rtype],
             kwargs
         )
         return T.Assign([T.Name(funnane)], binding_call)
@@ -633,7 +633,7 @@ class BindingGenerator:
 
             pair = T.Tuple()
             pair.elts = [
-                T.Str(attr.spelling),
+                T.Constant(attr.spelling),
                 typename
             ]
             attrs.elts.append(pair)

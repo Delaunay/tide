@@ -3,7 +3,7 @@ from collections import defaultdict
 import copy
 import logging
 import re
-from typing import List
+from typing import List, Optional, Tuple
 
 import tide.generators.nodes as T
 from tide.generators.binding_generator import c_identifier
@@ -17,6 +17,28 @@ acronyms_db = Trie()
 acronyms_db.insert('GL')
 acronyms_db.insert('RLE')   # Run Length Encoding
 acronyms_db.insert('YUV')   # Luma, Blue, Red
+acronyms_db.insert('RAM')
+acronyms_db.insert('RGB')   # Red Green Blue
+acronyms_db.insert('RW')    # Read Write
+# CPU Features
+# SIMD
+acronyms_db.insert('MMX')    # Matrix Math Extensions - Intel
+acronyms_db.insert('3DNow')  # AMD version of MMX
+acronyms_db.insert('SSE')    # Streaming SIMD Extensions successor of MMX
+acronyms_db.insert('SSE2')
+acronyms_db.insert('SSE3')
+acronyms_db.insert('SSE41')
+acronyms_db.insert('SSE42')
+acronyms_db.insert('AVX')
+acronyms_db.insert('AVX2')
+acronyms_db.insert('AltiVec')   # Power Arch - SIMD
+acronyms_db.insert('NEON')      # ARM Arch - SIMD
+
+acronyms_db.insert('RDTSC')     # Read Time-Stamp Counter
+
+
+# TODO: detect constructors and merge constructors
+# TODO: detect resource open/close object
 
 
 def get_ast(code):
@@ -93,10 +115,15 @@ def parse_sdl_name(name):
     >>> parse_sdl_name('SDL_GLprofile')
     ('SDL', ['GL', 'profile'])
 
-    This case is problematic
     >>> parse_sdl_name('SDL_UpdateYUVTexture')
     ('SDL', ['update', 'YUV', 'texture'])
+
+    >>> parse_sdl_name('_SDL_Haptic')
+    ('SDL', ['haptic'])
     """
+    if name[0] == '_':
+        return parse_sdl_name(name[1:])
+
     # <module>_CamelCase
     try:
         module, name = name.split('_', maxsplit=1)
@@ -151,6 +178,12 @@ def parse_sdl_name(name):
             names.append(buffer)
 
     return module, names
+
+
+def fetch_docstring(data: T.ClassDef):
+    if match(data.body[0], 'Expr', ('value', 'Constant')) and data.body[0].value.docstring:
+        return data.body.pop(0)
+    return None
 
 
 def get_kwarg_arg(name, kwargs: List[T.Keyword], default):
@@ -230,6 +263,77 @@ def clean_name(original_name, to_remove):
     return new_name
 
 
+class BindCall:
+    """Simple wrapper used to access the information stored inside a _bind call"""
+    ARGS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.lower()
+
+    def __init__(self, binding):
+        self.call = binding
+
+    def clear_kwargs(self) -> None:
+        self.call.keywords = []
+
+    @staticmethod
+    def is_binding_call(expr) -> bool:
+        return match(expr, 'Call', ('func', 'Name')) and expr.func.id == '_bind'
+
+    @property
+    def function_name(self) -> str:
+        return self.call.args[0].value
+
+    @property
+    def return_type(self) -> T.Expression:
+        return self.call.args[2]
+
+    @property
+    def docstring(self) -> T.Constant:
+        return get_kwarg_arg('docstring', self.call.keywords, '')
+
+    @property
+    def argument_names(self) -> List[str]:
+        arg_names = get_kwarg_arg('arg_names', self.call.keywords, None)
+
+        if arg_names is not None:
+            return [a.value.lower() for a in arg_names.elts]
+        else:
+            return BindCall.ARGS
+
+    @staticmethod
+    def extract_pointer_type(expr):
+        # POINTER(SDL_Renderer)
+        #         ^~~~~~~~~~~^
+        if match(expr, 'Call', ('func', 'Name')) and expr.func.id == 'POINTER' and match(expr.args[0], 'Name'):
+            return expr.args[0].id
+        return None
+
+    def is_constructor(self) -> Optional[str]:
+        """Return the type of the object this method returns"""
+        return_arg: T.List = self.call.args[2]
+        return self.extract_pointer_type(return_arg)
+
+    def is_method(self) -> Optional[str]:
+        """Return the type of the object this method belongs to or None"""
+        ctype_args: List = self.arguments
+
+        if len(ctype_args) == 0:
+            return None
+
+        self_arg: T.Call = ctype_args[0]
+        return self.extract_pointer_type(self_arg)
+
+    @property
+    def arguments(self) -> List[T.Expression]:
+        args = self.call.args[1]
+
+        if match(args, 'Name') and args.id == 'None':
+            return []
+
+        if match(args, 'List'):
+            return args.elts
+
+        assert False
+
+
 class APIPass:
     """Generate a more friendly API for C bindings
 
@@ -259,6 +363,7 @@ class APIPass:
         # we will remove wrappers that do not have methods
         # i.e they are data struct only
         self.wrapper_method_count = defaultdict(int)
+        self.wrapper_ctor = defaultdict(list)
         self.new_code = []
         self.names = Trie()
         self.rename_types = dict()
@@ -266,6 +371,15 @@ class APIPass:
 
     def post_process_class_defintion(self, class_def: T.ClassDef):
         """Make a final pass over the generated class to improve function names"""
+
+        # move the documentation over to our new class
+        c_class_name = self.wrappers_2_ctypes[class_def.name]
+        c_class_def = self.ctypes[c_class_name]
+        docstring = fetch_docstring(c_class_def)
+
+        if docstring:
+            class_def.body.insert(0, docstring)
+        # --
 
         class_name = class_def.name.lower()
         names = defaultdict(int)
@@ -304,6 +418,7 @@ class APIPass:
         pass
 
     def clean_up_enumeration(self, class_def: T.ClassDef):
+        """Removes superfluous prefix"""
         _, names = parse_sdl_name(class_def.name)
         cl_name = class_name(*names)
 
@@ -354,17 +469,12 @@ class APIPass:
 
         return class_def
 
-    def fetch_docstring(self, data: T.ClassDef):
-        if match(data.body[0], 'Constant') and data.body[0].docstring:
-            return data.body.pop(0)
-        return None
-
     def class_definition(self, class_def: T.ClassDef, depth):
         self.ctypes[class_def.name] = class_def
 
         # Opaque struct: move on
-        if class_def.name[0] == '_':
-            return class_def
+        # if class_def.name[0] == '_':
+        #    return class_def
 
         self_wrap = self.wrappers.get(class_def.name)
         if self_wrap is None:
@@ -372,7 +482,6 @@ class APIPass:
                 return self.clean_up_enumeration(class_def)
 
             _, names = parse_sdl_name(class_def.name)
-            docstring = self.fetch_docstring(class_def)
 
             cl_name = class_name(*names)
             self_wrap = T.ClassDef(cl_name)
@@ -381,14 +490,14 @@ class APIPass:
             self.wrappers_2_ctypes[self_wrap.name] = class_def.name
             self.wrapper_order[self_wrap.name] = len(self.wrappers)
 
-            if docstring:
-                self_wrap.body.append(docstring)
-            self_wrap.body.append(T.AnnAssign(T.Name('handle'), T.Name(class_def.name), T.Name('None')))
+            self_type = T.Call(T.Name('POINTER'), [T.Name(class_def.name)])
+
+            self_wrap.body.append(T.AnnAssign(T.Name('handle'), self_type, T.Name('None')))
 
             # Factory to build the wrapper form the ctype
             # create an uninitialized version of the object and set the handle
             from_ctype = T.FunctionDef('from_handle', decorator_list=[T.Name('staticmethod')])
-            from_ctype.args = T.Arguments(args=[T.Arg('a', T.Name(class_def.name))])
+            from_ctype.args = T.Arguments(args=[T.Arg('a', self_type)])
             from_ctype.returns = T.Constant(cl_name)
             from_ctype.body = [
                 T.Assign([T.Name('b')], T.Call(T.Attribute(T.Name('object'), '__new__'), [T.Name(cl_name)])),
@@ -405,7 +514,6 @@ class APIPass:
         return function_def
 
     SELF_HANDLE = T.Attribute(T.Name('self'), 'handle')
-    ARGS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.lower()
 
     def rename(self, n):
         new_name = self.rename_types.get(n, None)
@@ -423,104 +531,181 @@ class APIPass:
             return T.Name(new_name)
         return n
 
-    def process_bind_call(self, call: T.Call, parent):
-        fun_name = call.args[0].s
-        ctype_args: T.List = call.args[1]
-        ctype_return = call.args[2]
+    def make_wrapping_call(self, call: BindCall, replace_arg_names: Optional[List] = None, replace_args: Optional[List] = None) -> Tuple[T.Arguments, T.Call]:
+        if replace_arg_names is None:
+            replace_arg_names = []
 
-        if match(ctype_args, 'Name'):
-            return parent
+        if replace_args is None:
+            replace_args = []
 
-        if not match(ctype_args, 'List'):
-            return parent
+        assert len(replace_args) == len(replace_arg_names)
 
-        self_name = None
-        self_arg: T.Call = ctype_args.elts[0]
+        fun_name = call.function_name
+        offset = len(replace_args)
+        ctype_args = list(call.arguments[offset:])
+        arg_names = list(call.argument_names[offset:])
 
-        arg_names = get_kwarg_arg('arg_names', call.keywords, None)
-        docstring = get_kwarg_arg('docstring', call.keywords, '')
+        fun_args = T.Arguments(args=replace_arg_names + [T.Arg(n, self.rename(t)) for n, t in zip(arg_names, ctype_args)])
+        fun_call = T.Call(T.Name(fun_name), replace_args + [T.Name(arg_names[i]) for i in range(len(ctype_args))])
 
-        # the data is now duplicated in our better api
-        # we can just remove it
-        call.keywords = []
+        return fun_args, fun_call
 
-        if arg_names is not None:
-            arg_names = [a.value.lower() for a in arg_names.elts]
-        else:
-            arg_names = self.ARGS
-
-        # Extract the self type
-        # SDL_RenderSetLogicalSize = _bind('SDL_RenderSetLogicalSize', [POINTER(SDL_Renderer), c_int, c_int], c_int)
-        #                                                                       ^~~~~~~~~~~^
-        if match(self_arg, 'Call', ('func', 'Name')) and self_arg.func.id == 'POINTER' and match(self_arg.args[0], 'Name'):
-            self_name = self_arg.args[0].id
-
-        self_def = self.ctypes.get(self_name)
-        if not self_def and match(self_def, 'ClassDef'):
-            return parent
-
-        # Generate our new python class that will wrap the ctypes
-        self_wrap: T.ClassDef = self.wrappers.get(self_name)
-        if self_wrap is None:
-            return parent
-
-        _, names = parse_sdl_name(fun_name)
-        ctype_args = list(ctype_args.elts[1:])
-        arg_names = list(arg_names[1:])
-        self.current_class_name = self_wrap.name
+    def add_docstring(self, new_fun: T.FunctionDef, binding: BindCall, indent_level: int):
+        docstring = binding.docstring
 
         if docstring:
-            # increase the indentation
-            docstring.value = docstring.value.replace('\n    ',  '\n        ')
+            docstring.value = docstring.value.replace('\n    ', '\n' + '    ' * indent_level)
+            new_fun.body.insert(0, T.Expr(docstring))
+
+    def generate_constructor(self, class_def:  T.ClassDef, call: BindCall):
+        self.current_class_name = class_def.name
+        cl_name = class_def.name
+
+        # because we can have multiple constructors we have a to generate a constructor as a static method
+        fun_name = call.function_name
+        ctype_return = call.return_type
+        _, names = parse_sdl_name(fun_name)
+
+        args, c_call = self.make_wrapping_call(call)
+
+        new_fun = T.FunctionDef(function_name(*names), decorator_list=[T.Name('staticmethod')])
+        new_fun.returns = self.rename(ctype_return)
+        new_fun.args = args
+        new_fun.body = [
+            T.Assign([T.Name('b')], T.Call(T.Attribute(T.Name('object'), '__new__'), [T.Name(cl_name)])),
+            T.Assign([T.Attribute(T.Name('b'), 'handle')], c_call),
+            T.Return(T.Name('b'))
+        ]
+
+        self.add_docstring(new_fun, call, 2)
+        call.clear_kwargs()
+        class_def.body.append(new_fun)
+        self.current_class_name = None
+
+    def get_arg_names(self, call: T.Call):
+        arg_names = get_kwarg_arg('arg_names', call.keywords, None)
+
+        if arg_names is not None:
+            return [a.value.lower() for a in arg_names.elts]
+        else:
+            return self.ARGS
+
+    def generate_method(self, call: BindCall, self_wrap: T.ClassDef):
+        fun_name = call.function_name
+        _, names = parse_sdl_name(fun_name)
+
+        self.current_class_name = self_wrap.name
+
+        args, c_call = self.make_wrapping_call(
+            call,
+            replace_arg_names=[T.Arg('self')],
+            replace_args=[self.SELF_HANDLE]
+        )
 
         new_fun = T.FunctionDef(function_name(*names))
-        new_fun.returns = self.rename(ctype_return)
-        new_fun.args = T.Arguments(args=[T.Arg('self')] + [T.Arg(n, self.rename(t)) for n, t in zip(arg_names, ctype_args)])
-
-        # we need to convert the result to our new class
-        ccall = T.Call(T.Name(fun_name), [self.SELF_HANDLE] + [T.Name(arg_names[i]) for i in range(len(ctype_args))])
+        new_fun.returns = self.rename(call.return_type)
+        new_fun.args = args
 
         # does the return type need to be wrapped
-        if new_fun.returns != ctype_return:
+        if new_fun.returns != call.return_type:
             cast_to = new_fun.returns
 
             if isinstance(new_fun.returns, T.Constant):
                 cast_to = T.Name(new_fun.returns.value)
 
-            ccall = T.Call(T.Attribute(cast_to, 'from_handle'), [ccall])
+            c_call = T.Call(T.Attribute(cast_to, 'from_handle'), [c_call])
 
-        new_fun.body = []
-        if docstring:
-            new_fun.body.append(T.Expr(docstring))
-        new_fun.body.append(T.Return(ccall))
+        new_fun.body = [
+            T.Return(c_call)
+        ]
+
+        self.add_docstring(new_fun, call, 2)
+        call.clear_kwargs()
 
         if self.is_multi_output(new_fun):
             new_fun = self.rewrite_multi_output_function(new_fun)
 
         self_wrap.body.append(new_fun)
 
-        # try to find destructor and constructor functions
-        for i, n in enumerate(names):
-            arg_n = len(new_fun.args.args)
-
-            # check if the function is named destroy + class_name
-            if arg_n == 1 and n == 'destroy' and i + 2 == len(names) and names[i + 1] == self_wrap.name.lower():
-                destructor = copy.deepcopy(new_fun)
-                destructor.name = '__del__'
-                self_wrap.body.append(destructor)
-                break
-
-            # sdl is not consistent with that one
-            if n == 'free':
-                destructor = copy.deepcopy(new_fun)
-                destructor.name = '__del__'
-                self_wrap.body.append(destructor)
+        # we cannot automatically add a destructor because we do not know
+        # which object is owning what
+        # # try to find destructor and constructor functions
+        # for i, n in enumerate(names):
+        #     arg_n = len(new_fun.args.args)
+        #
+        #     # check if the function is named destroy + class_name
+        #     if arg_n == 1 and n == 'destroy' and i + 2 == len(names) and names[i + 1] == self_wrap.name.lower():
+        #         destructor = copy.deepcopy(new_fun)
+        #         destructor.name = '__del__'
+        #         self_wrap.body.append(destructor)
+        #         break
+        #
+        #     # sdl is not consistent with that one
+        #     if n == 'free':
+        #         destructor = copy.deepcopy(new_fun)
+        #         destructor.name = '__del__'
+        #         self_wrap.body.append(destructor)
 
         self.wrapper_method_count[self.current_class_name] += 1
         self.current_class_name = None
 
-        # We are ready to move our function from
-        # print(object_type)
+    def generate_function_wrapper(self, call: BindCall):
+        fun_name = call.function_name
+        _, names = parse_sdl_name(fun_name)
+
+        args, c_call = self.make_wrapping_call(call)
+
+        new_fun = T.FunctionDef(function_name(*names))
+        new_fun.returns = self.rename(call.return_type)
+        new_fun.args = args
+        new_fun.body = [
+            T.Return(c_call)
+        ]
+
+        self.add_docstring(new_fun, call, 1)
+        call.clear_kwargs()
+
+        self.new_code.append((None, new_fun))
+        return
+
+    def process_bind_call(self, call: BindCall, parent):
+        """Try to find the class this function belongs to"""
+        fun_name = call.function_name
+
+        # constructor
+        self_name = call.is_constructor()
+        if self_name:
+            class_def: T.ClassDef = self.wrappers.get(self_name)
+            if class_def:
+                return self.generate_constructor(class_def, call)
+
+            return self.generate_function_wrapper(call)
+        # ---
+
+        self_name = call.is_method()
+        # not a method
+        if self_name is None:
+            self.generate_function_wrapper(call)
+            return parent
+
+        self_def = self.ctypes.get(self_name)
+        if not self_def:
+            log.debug(f'Method `{fun_name}` does not have c-class')
+            self.generate_function_wrapper(call)
+            return parent
+
+        # not a known class
+        if not match(self_def, 'ClassDef'):
+            self.generate_function_wrapper(call)
+            return parent
+
+        # Generate our new python class that will wrap the ctypes
+        self_wrap: T.ClassDef = self.wrappers.get(self_name)
+        if self_wrap is None and match(self_def, 'ClassDef'):
+            log.debug(f'Method `{fun_name}` does not have wrapped class `{self_name}`')
+            return parent
+
+        self.generate_method(call, self_wrap)
         return parent
 
     handle_is_not_none = T.Assert(
@@ -584,8 +769,19 @@ class APIPass:
         return new_func
 
     def assign(self, expr: T.Assign, depth):
-        if match(expr.value, 'Call', ('func', 'Name')) and expr.value.func.id == '_bind':
-            expr = self.process_bind_call(expr.value, expr)
+        if BindCall.is_binding_call(expr.value):
+            expr = self.process_bind_call(BindCall(expr.value), expr)
+
+        elif match(expr.value, 'Name') and match(expr.targets[0], 'Name'):
+            alias_name = expr.targets[0].id
+            aliased_name = expr.value.id
+
+            aliased_ctype = self.ctypes.get(aliased_name)
+            aliased_wrapped = self.wrappers.get(aliased_name)
+
+            self.rename_types[aliased_name] = alias_name
+            self.ctypes[alias_name] = aliased_ctype
+            self.wrappers[alias_name] = aliased_wrapped
 
         return expr
 

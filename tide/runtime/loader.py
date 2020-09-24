@@ -142,6 +142,9 @@ class DLL(object):
             warnings.warn(str(v))
             return lazy_function_error(v)
 
+        if not args:
+            args = None
+
         func.argtypes = args
         func.restype = returns
         return func
