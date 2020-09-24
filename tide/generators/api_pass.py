@@ -674,7 +674,7 @@ class APIPass:
 
         # constructor
         self_name = call.is_constructor()
-        if self_name:
+        if self_name and call.is_method() is None:
             class_def: T.ClassDef = self.wrappers.get(self_name)
             if class_def:
                 return self.generate_constructor(class_def, call)
