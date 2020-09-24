@@ -133,7 +133,7 @@ class DLL(object):
             added (str, optional): The version of the library in which the
                 function was added, in the format '2.x.x'.
 
-            kwargs (dict): used to hold arbitrary data from the c-binding generator
+            kwargs: used to hold arbitrary data from the c-binding generator
         """
         func = getattr(self._dll, funcname, None)
 

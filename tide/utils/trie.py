@@ -24,6 +24,19 @@ class Trie:
 
         return p
 
+    def __contains__(self, item):
+        """Suggest full words to complete the partial string provided
+
+        Examples
+        --------
+        >>> trie = Trie()
+        >>> trie.insert('abc')
+        >>> 'abc' in trie
+        True
+        """
+        t = self.find(item)
+        return t is not None and t.leaf
+
     def suggest(self, name: str, full_words=True) -> Iterable[str]:
         """Suggest full words to complete the partial string provided
 

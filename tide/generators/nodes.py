@@ -64,6 +64,9 @@ class arg:
     end_lineno: Optional[int] = None
     end_col_offset: Optional[int] = None
 
+    def __repr__(self):
+        return f'Arg(arg={self.arg}, ann={self.annotation})'
+
 Arg = arg
 
 #  arguments Product([Field(arg, posonlyargs, seq=True), Field(arg, args, seq=True), Field(arg, vararg, opt=True), Field(arg, kwonlyargs, seq=True), Field(expr, kw_defaults, seq=True), Field(arg, kwarg, opt=True), Field(expr, defaults, seq=True)])

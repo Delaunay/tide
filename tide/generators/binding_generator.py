@@ -506,7 +506,7 @@ class BindingGenerator:
         >>> module = BindingGenerator().generate(tu)
         >>> print(compact(unparse(module)))
         <BLANKLINE>
-        add = _bind('add', [c_float, c_float], c_float)
+        add = _bind('add', [c_float, c_float], c_float, arg_names=['a', 'b'])
         <BLANKLINE>
         """
         log.debug(f'{d(depth)}Generate function `{elem.spelling}`')

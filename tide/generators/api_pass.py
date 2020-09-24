@@ -162,7 +162,7 @@ def get_kwarg_arg(name, kwargs: List[T.Keyword], default):
 
 
 def capitalize(s: str) -> str:
-    if s.isupper():
+    if s.isupper() and acronyms_db.find(s):
         return s
     return s.capitalize()
 
@@ -242,7 +242,7 @@ class APIPass:
     * Method has a short name removing the object name and the library namespace
     * enum values are now scoped inside an enum class
     * enum values have shorter names since name clashing cannot happen anymore
-
+    * rewrites function that takes pointer arguments to return multiple values
     """
     def __init__(self):
         self.dispatcher = {
@@ -309,6 +309,7 @@ class APIPass:
 
         # make a short alias of the enum (without the hardcoded c namespace)
         if cl_name != class_def.name:
+            print(cl_name)
             self.new_code.append((None, T.Assign([T.Name(cl_name)], T.Name(class_def.name))))
 
         t = Trie()
@@ -462,43 +463,32 @@ class APIPass:
         self.current_class_name = self_wrap.name
 
         if docstring:
+            # increase the indentation
             docstring.value = docstring.value.replace('\n    ',  '\n        ')
 
-        # is this a accessor get_something(pointer)
-        if 'get' in names and len(ctype_args) == 1 and match(ctype_args[0], 'Call', ('func', 'Name')) and ctype_args[0].func.id == 'POINTER':
-            # Pointer(TYPE)
-            access_type = ctype_args[0].args[0].id
+        new_fun = T.FunctionDef(function_name(*names))
+        new_fun.returns = self.rename(ctype_return)
+        new_fun.args = T.Arguments(args=[T.Arg('self')] + [T.Arg(n, self.rename(t)) for n, t in zip(arg_names, ctype_args)])
 
-            new_fun = get_ast(f"""
-            |def {function_name(*names)}(self) -> {access_type}:
-            |    result = {access_type}()
-            |    error = {fun_name}(self.handle, byref(result));
-            |    return result
-            |""".replace('            |', ''))
+        # we need to convert the result to our new class
+        ccall = T.Call(T.Name(fun_name), [self.SELF_HANDLE] + [T.Name(arg_names[i]) for i in range(len(ctype_args))])
 
-            if docstring:
-                new_fun.body.insert(0, T.Expr(docstring))
-        else:
-            new_fun = T.FunctionDef(function_name(*names))
-            new_fun.returns = self.rename(ctype_return)
-            new_fun.args = T.Arguments(args=[T.Arg('self')] + [T.Arg(n, self.rename(t)) for n, t in zip(arg_names, ctype_args)])
+        # does the return type need to be wrapped
+        if new_fun.returns != ctype_return:
+            cast_to = new_fun.returns
 
-            # we need to convert the result to our new class
-            ccall = T.Call(T.Name(fun_name), [self.SELF_HANDLE] + [T.Name(arg_names[i]) for i in range(len(ctype_args))])
+            if isinstance(new_fun.returns, T.Constant):
+                cast_to = T.Name(new_fun.returns.value)
 
-            # does the return type need to be wrapped
-            if new_fun.returns != ctype_return:
-                cast_to = new_fun.returns
+            ccall = T.Call(T.Attribute(cast_to, 'from_handle'), [ccall])
 
-                if isinstance(new_fun.returns, T.Constant):
-                    cast_to = T.Name(new_fun.returns.value)
+        new_fun.body = []
+        if docstring:
+            new_fun.body.append(T.Expr(docstring))
+        new_fun.body.append(T.Return(ccall))
 
-                ccall = T.Call(T.Attribute(cast_to, 'from_handle'), [ccall])
-
-            new_fun.body = []
-            if docstring:
-                new_fun.body.append(T.Expr(docstring))
-            new_fun.body.append(T.Return(ccall))
+        if self.is_multi_output(new_fun):
+            new_fun = self.rewrite_multi_output_function(new_fun)
 
         self_wrap.body.append(new_fun)
 
@@ -531,6 +521,60 @@ class APIPass:
             left=T.Attribute(value=T.Name(id='self', ctx=T.Load()), attr='handle', ctx=T.Load()),
             ops=[T.IsNot()],
             comparators=[T.Constant(value=None, kind=None)]), msg=None)
+
+    def is_multi_output(self, func: T.FunctionDef):
+        expr = func.body[0]
+
+        if not match(expr, 'Expr', ('value', 'Constant')):
+            return False
+
+        expr: T.Constant = func.body[0].value
+
+        if not expr.docstring:
+            return False
+
+        # if doc string specify it returns an error
+        # or if function is known to return nothing
+        if ':return 0 on success, or -1' not in expr.value and (match(func.returns, 'Name') and func.returns.id != 'None'):
+            return False
+
+        for arg in func.args.args[1:]:
+            if not match(arg.annotation, 'Call', ('func', 'Name')):
+                return False
+
+            elif arg.annotation.func.id != 'POINTER':
+                return False
+
+        return True
+
+    def rewrite_multi_output_function(self, func: T.FunctionDef):
+        new_func = T.FunctionDef(func.name)
+        new_func.args = T.Arguments(args=[T.Arg('self')])
+        new_func.body = [func.body[0]]
+
+        arg_len = len(func.args.args[1:])
+        if arg_len == 0:
+            return func
+
+        for arg in func.args.args[1:]:
+            # Generate the result argument
+            var_type = arg.annotation.args[0]
+            new_func.body.append(T.Assign([T.Name(arg.arg)], T.Call(var_type)))
+
+        original_call: T.Call = func.body[1].value
+
+        for i in range(len(original_call.args[1:])):
+            original_call.args[i + 1] = T.Call(T.Name('byref'), [T.Name(func.args.args[i + 1].arg)])
+
+        new_func.body.append(T.Assign([T.Name('error')], original_call))
+
+        returns = [T.Name(arg.arg) for arg in func.args.args[1:]]
+        if len(returns) == 1:
+            new_func.body.append(T.Return(returns[0]))
+        else:
+            new_func.body.append(T.Return(T.Tuple(returns)))
+
+        return new_func
 
     def assign(self, expr: T.Assign, depth):
         if match(expr.value, 'Call', ('func', 'Name')) and expr.value.func.id == '_bind':
