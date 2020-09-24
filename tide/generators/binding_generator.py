@@ -198,6 +198,10 @@ def get_comment(elem, indent='    '):
     comment = ''
     if elem.raw_comment:
         comment = reformat_comment(elem.raw_comment)
+
+    if comment and '\n' in comment and comment[-5:] != '\n    ':
+        return comment + '\n    '
+
     return comment
 
 
@@ -698,14 +702,20 @@ class BindingGenerator:
         # Docstring is the first element of the body
         # T.Constant(get_comment(elem))
         body = []
+        docstring = get_comment(elem)
+        if docstring:
+            body.append(T.Expr(T.Constant(docstring, docstring=True)))
+
         attrs = T.List()
 
+        need_pass = len(body)
         attr: Cursor
         for attr in elem.get_children():
             self.generate_field(body, attrs, attr, anonymous_renamed, depth)
 
-        # fields are at the end because we might use types defined above
-        if not body:
+        # insert pass even if we have a docstring because
+        # we will remove the docstring later
+        if need_pass == len(body):
             body.append(ast.Pass())
 
         if not attrs.elts:

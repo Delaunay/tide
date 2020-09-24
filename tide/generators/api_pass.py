@@ -309,7 +309,6 @@ class APIPass:
 
         # make a short alias of the enum (without the hardcoded c namespace)
         if cl_name != class_def.name:
-            print(cl_name)
             self.new_code.append((None, T.Assign([T.Name(cl_name)], T.Name(class_def.name))))
 
         t = Trie()
@@ -355,6 +354,11 @@ class APIPass:
 
         return class_def
 
+    def fetch_docstring(self, data: T.ClassDef):
+        if match(data.body[0], 'Constant') and data.body[0].docstring:
+            return data.body.pop(0)
+        return None
+
     def class_definition(self, class_def: T.ClassDef, depth):
         self.ctypes[class_def.name] = class_def
 
@@ -368,6 +372,7 @@ class APIPass:
                 return self.clean_up_enumeration(class_def)
 
             _, names = parse_sdl_name(class_def.name)
+            docstring = self.fetch_docstring(class_def)
 
             cl_name = class_name(*names)
             self_wrap = T.ClassDef(cl_name)
@@ -376,6 +381,8 @@ class APIPass:
             self.wrappers_2_ctypes[self_wrap.name] = class_def.name
             self.wrapper_order[self_wrap.name] = len(self.wrappers)
 
+            if docstring:
+                self_wrap.body.append(docstring)
             self_wrap.body.append(T.AnnAssign(T.Name('handle'), T.Name(class_def.name), T.Name('None')))
 
             # Factory to build the wrapper form the ctype
