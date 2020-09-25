@@ -505,7 +505,20 @@ class APIPass:
                 T.Return(T.Name('b'))
             ]
 
+            # default init allocate a dummy object for it
+            default_init = T.FunctionDef('__init__')
+            default_init.args = T.Arguments(args=[T.Arg('self')])
+            default_init.body = [
+                T.Assign(
+                    [T.Attribute(T.Name('self'), '_value')],
+                    T.Call(T.Name(class_def.name), [])),
+                T.Assign(
+                    [T.Attribute(T.Name('self'), 'handle')],
+                    T.Call(T.Name('byref'), [T.Attribute(T.Name('self'), '_value')]))
+            ]
+
             self_wrap.body.append(from_ctype)
+            self_wrap.body.append(default_init)
             self.rename_types[T.Call(T.Name('POINTER'), [T.Name(class_def.name)])] = cl_name
 
         return class_def

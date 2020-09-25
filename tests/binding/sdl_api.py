@@ -12,8 +12,11 @@ def main():
 
     window = sdl2.Window.create(
         b"Hello World",
-      sdl2.SDL_WINDOWPOS_UNDEFINED, sdl2.SDL_WINDOWPOS_UNDEFINED,
-      592, 460, sdl2.WindowFlags.SHOWN)
+        sdl2.SDL_WINDOWPOS_UNDEFINED,
+        sdl2.SDL_WINDOWPOS_UNDEFINED,
+        592,
+        460,
+        sdl2.WindowFlags.SHOWN)
 
     windowsurface = window.get_surface()
 
@@ -25,9 +28,10 @@ def main():
 
     running = True
     event = sdl2.Event()
+
     while running:
         while event.poll() != 0:
-            if event.type == sdl2.EventType.QUIT:
+            if event._value.type == sdl2.EventType.QUIT:
                 running = False
                 break
 
