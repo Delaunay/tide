@@ -39,6 +39,7 @@ acronyms_db.insert('RDTSC')     # Read Time-Stamp Counter
 
 # TODO: detect constructors and merge constructors
 # TODO: detect resource open/close object
+# TODO: detect if object is pointer/ref or value
 
 
 def get_ast(code):
@@ -355,6 +356,11 @@ class APIPass:
             'ClassDef': self.class_definition,
             'FunctionDef': self.function_definition
         }
+        self.pre_dispatcher = {
+            'Expr': self.pre_expression,
+            'Assign': self.pre_assign,
+            'ClassDef': self.pre_class_definition,
+        }
         self.ctypes = dict()
         self.wrappers = dict()
         self.wrappers_2_ctypes = dict()
@@ -364,10 +370,44 @@ class APIPass:
         # i.e they are data struct only
         self.wrapper_method_count = defaultdict(int)
         self.wrapper_ctor = defaultdict(list)
+        self.ctypes_fields = dict()
         self.new_code = []
         self.names = Trie()
         self.rename_types = dict()
         self.current_class_name = None
+        self.new_names = set()
+
+    def pre_expression(self, expr: T.Expr, depth):
+        values = self.preprocess(expr.value, depth)
+        if isinstance(values, (tuple, list)):
+            return [T.Expr(v) for v in values]
+
+        return T.Expr(values)
+
+    def pre_class_definition(self, class_def: T.ClassDef, depth=0):
+        self.ctypes[class_def.name] = class_def
+
+    def pre_assign(self, expr: T.Assign, depth):
+        # <c-type>._fields_ = []
+        if match(expr.targets[0], 'Attribute') and match(expr.value, 'List') and expr.targets[0].attr == '_fields_':
+            ctype_name = expr.targets[0].value.id
+            data = []
+            self.ctypes_fields[ctype_name] = data
+
+            for elem in expr.value.elts:
+                name = elem.elts[0].value
+                ctype = elem.elts[1]
+                data.append((name, ctype))
+
+    def preprocess(self, expr, depth):
+        handler = self.pre_dispatcher.get(expr.__class__.__name__, None)
+
+        if handler is not None:
+            handler(expr, depth)
+
+    def preprocessor(self, module: T.Module, depth=0):
+        for expr in module.body:
+            self.preprocess(expr, depth)
 
     def post_process_class_defintion(self, class_def: T.ClassDef):
         """Make a final pass over the generated class to improve function names"""
@@ -469,8 +509,12 @@ class APIPass:
 
         return class_def
 
+    def is_opaque_container(self, name):
+        # does this class define fields
+        return self.ctypes_fields.get(name, None) is None
+
     def class_definition(self, class_def: T.ClassDef, depth):
-        self.ctypes[class_def.name] = class_def
+        assert class_def.name in self.ctypes
 
         # Opaque struct: move on
         # if class_def.name[0] == '_':
@@ -504,21 +548,23 @@ class APIPass:
                 T.Assign([T.Attribute(T.Name('b'), 'handle')], T.Name('a')),
                 T.Return(T.Name('b'))
             ]
-
-            # default init allocate a dummy object for it
-            default_init = T.FunctionDef('__init__')
-            default_init.args = T.Arguments(args=[T.Arg('self')])
-            default_init.body = [
-                T.Assign(
-                    [T.Attribute(T.Name('self'), '_value')],
-                    T.Call(T.Name(class_def.name), [])),
-                T.Assign(
-                    [T.Attribute(T.Name('self'), 'handle')],
-                    T.Call(T.Name('byref'), [T.Attribute(T.Name('self'), '_value')]))
-            ]
-
             self_wrap.body.append(from_ctype)
-            self_wrap.body.append(default_init)
+
+            if not self.is_opaque_container(class_def.name):
+                # default init allocate a dummy object for it
+                default_init = T.FunctionDef('__init__')
+                default_init.args = T.Arguments(args=[T.Arg('self')])
+                default_init.body = [
+                    T.Assign(
+                        [T.Attribute(T.Name('self'), '_value')],
+                        T.Call(T.Name(class_def.name), [])),
+                    T.Assign(
+                        [T.Attribute(T.Name('self'), 'handle')],
+                        T.Call(T.Name('byref'), [T.Attribute(T.Name('self'), '_value')]))
+                ]
+
+                self_wrap.body.append(default_init)
+
             self.rename_types[T.Call(T.Name('POINTER'), [T.Name(class_def.name)])] = cl_name
 
         return class_def
@@ -635,8 +681,8 @@ class APIPass:
         self.add_docstring(new_fun, call, 2)
         call.clear_kwargs()
 
-        if self.is_multi_output(new_fun):
-            new_fun = self.rewrite_multi_output_function(new_fun)
+        if self.is_multi_output(new_fun, offset=1):
+            new_fun = self.rewrite_multi_output_function(new_fun, offset=1)
 
         self_wrap.body.append(new_fun)
 
@@ -668,7 +714,15 @@ class APIPass:
 
         args, c_call = self.make_wrapping_call(call)
 
-        new_fun = T.FunctionDef(function_name(*names))
+        new_name = function_name(*names)
+
+        if new_name not in self.new_names:
+            self.new_names.add(new_name)
+        else:
+            log.warning(f'{new_name} already exist in this scope cannot rename {fun_name}')
+            new_name = fun_name
+
+        new_fun = T.FunctionDef(new_name)
         new_fun.returns = self.rename(call.return_type)
         new_fun.args = args
         new_fun.body = [
@@ -677,6 +731,9 @@ class APIPass:
 
         self.add_docstring(new_fun, call, 1)
         call.clear_kwargs()
+
+        if self.is_multi_output(new_fun, offset=0):
+            new_fun = self.rewrite_multi_output_function(new_fun, offset=0)
 
         self.new_code.append((None, new_fun))
         return
@@ -727,7 +784,7 @@ class APIPass:
             ops=[T.IsNot()],
             comparators=[T.Constant(value=None, kind=None)]), msg=None)
 
-    def is_multi_output(self, func: T.FunctionDef):
+    def is_multi_output(self, func: T.FunctionDef, offset):
         expr = func.body[0]
 
         if not match(expr, 'Expr', ('value', 'Constant')):
@@ -740,51 +797,101 @@ class APIPass:
 
         # if doc string specify it returns an error
         # or if function is known to return nothing
-        if ':return 0 on success, or -1' not in expr.value and (match(func.returns, 'Name') and func.returns.id != 'None'):
+        if (':return 0 on success, or -1' not in expr.value) and (match(func.returns, 'Name') and func.returns.id != 'None'):
             return False
 
-        for arg in func.args.args[1:]:
-            if not match(arg.annotation, 'Call', ('func', 'Name')):
+        if len(func.args.args[offset:]) == 0:
+            return False
+
+        count = 0
+        # multi output should group all the output at the end of the function call
+        previous_was_ptr = False
+
+        for arg in func.args.args[offset:]:
+            if match(arg.annotation, 'Call', ('func', 'Name')) and arg.annotation.func.id == 'POINTER':
+                count += 1
+                previous_was_ptr = True
+
+            elif previous_was_ptr:
                 return False
 
-            elif arg.annotation.func.id != 'POINTER':
-                return False
+        if count > 0:
+            log.debug(f'{func.name} has multiple outputs')
+            return True
 
-        return True
+        return False
 
-    def rewrite_multi_output_function(self, func: T.FunctionDef):
+    def rewrite_multi_output_function(self, func: T.FunctionDef, offset):
+        """
+        Notes
+        -----
+        Outputs should be grouped at the end of the function to differentiate between an output and an
+        array input
+        """
         new_func = T.FunctionDef(func.name)
-        new_func.args = T.Arguments(args=[T.Arg('self')])
         new_func.body = [func.body[0]]
 
-        arg_len = len(func.args.args[1:])
+        arg_len = len(func.args.args[offset:])
         if arg_len == 0:
             return func
 
-        for arg in func.args.args[1:]:
-            # Generate the result argument
-            var_type = arg.annotation.args[0]
-            new_func.body.append(T.Assign([T.Name(arg.arg)], T.Call(var_type)))
+        output_args = []
+        remaining_args = []
+        arg_type = dict()
+
+        # Filter output arguments
+        for i, arg in enumerate(func.args.args[offset:]):
+            if match(arg.annotation, 'Call', ('func', 'Name')) and arg.annotation.func.id == 'POINTER':
+                # Generate the result argument
+                var_type = arg.annotation.args[0]
+                new_func.body.append(T.Assign([T.Name(arg.arg)], T.Call(var_type)))
+                output_args.append(arg)
+                arg_type[i] = 'O'
+            else:
+                remaining_args.append(arg)
+                arg_type[i] = 'I'
 
         original_call: T.Call = func.body[1].value
 
-        for i in range(len(original_call.args[1:])):
-            original_call.args[i + 1] = T.Call(T.Name('byref'), [T.Name(func.args.args[i + 1].arg)])
+        for i in range(len(original_call.args[offset:])):
+            if arg_type[i] == 'O':
+                original_call.args[i + offset] = T.Call(T.Name('byref'), [T.Name(func.args.args[i + offset].arg)])
 
         new_func.body.append(T.Assign([T.Name('error')], original_call))
 
-        returns = [T.Name(arg.arg) for arg in func.args.args[1:]]
+        returns = [T.Name(arg.arg) for arg in output_args]
+        returns_types = [arg.annotation.args[0] for arg in output_args]
+
         if len(returns) == 1:
             new_func.body.append(T.Return(returns[0]))
+            new_func.returns = returns_types[0]
         else:
             new_func.body.append(T.Return(T.Tuple(returns)))
+            # new_func.returns = T.Call(T.Name('Tuple'), returns_types)
+            new_func.returns = T.Subscript(T.Name('Tuple'), T.ExtSlice(dims=returns_types), T.Load())
+
+        if offset == 1:
+            remaining_args = [T.Arg('self')] + remaining_args
+
+
+        new_func.args = T.Arguments(args=remaining_args)
 
         return new_func
 
+    def struct_fields(self, expr: T.Assign):
+        ctype_name = expr.targets[0].value.id
+        assert ctype_name in self.ctypes_fields
+
     def assign(self, expr: T.Assign, depth):
+        # <function> = _bind('c-function', [cargs], rtype, docstring=, arg_names=)
         if BindCall.is_binding_call(expr.value):
             expr = self.process_bind_call(BindCall(expr.value), expr)
 
+        # <c-type>._fields_ = []
+        elif match(expr.targets[0], 'Attribute') and match(expr.value, 'List') and expr.targets[0].attr == '_fields_':
+            self.struct_fields(expr)
+
+        # <Name> = <Name>
         elif match(expr.value, 'Name') and match(expr.targets[0], 'Name'):
             alias_name = expr.targets[0].id
             aliased_name = expr.value.id
@@ -808,6 +915,8 @@ class APIPass:
     def generate(self, module: T.Module, depth=0):
         new_module: T.Module = ast.Module()
         new_module.body = []
+
+        self.preprocessor(module)
 
         for expr in module.body:
             self.dispatch(expr, depth + 1)

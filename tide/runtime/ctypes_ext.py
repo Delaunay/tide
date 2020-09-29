@@ -1,4 +1,5 @@
 from ctypes import *
+from typing import Tuple
 
 c_int.__invert__ = lambda x: not x
 c_int8.__invert__ = lambda x: not x
