@@ -2,8 +2,15 @@ import os
 import sys
 import ctypes
 import signal
+
+os.environ['PYSDL2_DLL_PATH'] = 'F:\KiwiLib'
 from sdl2 import *
 from sdl2.sdlttf import *
+
+import OpenGL.GL as gl
+
+import imgui
+from imgui.integrations.sdl2 import SDL2Renderer
 
 from typing import *
 from tide.log import info, debug
@@ -97,8 +104,10 @@ class Font:
 
 
 class Renderer:
-    def __init__(self, handle):
+    def __init__(self, handle, imgui_impl, window):
         self.handle = handle
+        self.imgui_impl = imgui_impl
+        self.window = window
 
     def __del__(self):
         self.destroy()
@@ -122,6 +131,9 @@ class Renderer:
         with DrawColor(self, colour):
             check(SDL_RenderClear(self.handle))
 
+        gl.glClearColor(1., 1., 1., 1)
+        gl.glClear(gl.GL_COLOR_BUFFER_BIT)
+
     def copy(self, texture: SDL_Texture, src_rect: Optional[SDL_Rect], dst_rect: SDL_Rect):
         check(SDL_RenderCopy(self.handle, texture, src_rect, dst_rect))
 
@@ -137,6 +149,10 @@ class Renderer:
     def present(self):
         # __main__.SDLError: Surface doesn't have a colorkey
         SDL_RenderPresent(self.handle)
+        imgui.render()
+        self.imgui_impl.render(imgui.get_draw_data())
+
+        SDL_GL_SwapWindow(self.window)
         SDL_ClearError()
 
     def create_texture(self, surface):
@@ -185,9 +201,15 @@ class ResourceManager:
 
 
 class Window:
-    def __init__(self, handle):
+    def __init__(self, handle, glhandle, comp):
         self.handle = handle
+        self.gl_context = glhandle
         self._renderer = None
+        self.imgui_impl = SDL2Renderer(handle)
+        self.comp = comp
+
+    def make_current(self):
+        SDL_GL_MakeCurrent(self.handle, self.gl_context)
 
     @property
     def uid(self):
@@ -201,6 +223,9 @@ class Window:
         if self._renderer is not None:
             self._renderer.destroy()
 
+        if self.gl_context is not None:
+            SDL_GL_DeleteContext(self.gl_context)
+
         if self.handle is not None:
             SDL_DestroyWindow(self.handle)
             self.handle = None
@@ -209,15 +234,22 @@ class Window:
         SDL_UpdateWindowSurface(self.handle)
 
     def handle_event(self, event):
-        print(event)
+        print(f'{event.type:x}')
+        self.imgui_impl.process_event(event)
 
     @property
     def renderer(self):
         if self._renderer is None:
             render = SDL_CreateRenderer(self.handle, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC)
-            self._renderer = Renderer(render)
+            self._renderer = Renderer(render, self.imgui_impl, self.handle)
 
         return self._renderer
+
+    def tick(self):
+        self.imgui_impl.process_inputs()
+        self.renderer.clear()
+        self.comp._render()
+        self.renderer.present()
 
     def __del__(self):
         self.destroy()
@@ -231,18 +263,89 @@ class Window:
         SDL_SetWindowTitle(name)
 
 
+class WindowComponent:
+    def __init__(self, name='', w=1280, h=720):
+        self.name = name
+        self.w = w
+        self.h = h
+
+    def _render(self):
+        imgui.new_frame()
+        self.draw()
+
+
+    def function(self, fun):
+        import tide.generators.nodes as nodes
+        f: nodes.FunctionDef = fun
+
+        imgui.begin_group()
+        imgui.text('def');  imgui.same_line()
+        imgui.input_text('nolavel', f.name); imgui.same_line()
+        imgui.text('('); imgui.same_line()
+        imgui.text(')'); imgui.same_line()
+        imgui.text('->'); imgui.same_line()
+        imgui.text(str(f.returns)); imgui.same_line()
+        imgui.text(':')
+
+        imgui.end_group()
+
+
+    def draw(self):
+        import ast
+        module = ast.parse("""
+        |def add(a: float, b: float) -> float:
+        |    return a + b
+        |""".replace('        |', ''))
+
+        imgui.begin("Module", True)
+        fun = module.body[0]
+        self.function(fun)
+        imgui.end()
+
+        # imgui.begin("Custom window", True)
+        # imgui.text("Bar")
+        # imgui.text_colored("Eggs", 0.2, 1., 0.)
+        # imgui.end()
+
+        #
+        # imgui.begin("Custom window", True)
+        # imgui.text("Bar")
+        # # imgui.begin_group()
+        # # imgui.text('def')
+        # # imgui.text('function')
+        # # imgui.text('(')
+        # # imgui.text('')
+        # # imgui.end_group()
+        # imgui.end()
+
+
 class WindowManager:
     def __init__(self):
         self.windows = dict()
         self.event = SDL_Event()
         self.running = True
         self.current_window = None
+        imgui.create_context()
 
     def __enter__(self):
         check(SDL_Init(SDL_INIT_EVERYTHING))
 
+        SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1)
+        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24)
+        SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8)
+        SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1)
+        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1)
+        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 16)
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG)
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4)
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1)
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE)
+
         # Anti-aliasing
         SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, b"2")
+        SDL_SetHint(SDL_HINT_MAC_CTRL_CLICK_EMULATE_RIGHT_CLICK, b"1")
+        SDL_SetHint(SDL_HINT_VIDEO_HIGHDPI_DISABLED, b"1")
+        SDL_GL_SetSwapInterval(1)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -250,21 +353,25 @@ class WindowManager:
             window.destroy()
         SDL_Quit()
 
-    def new_window(self, w=1280, h=720, *args, **kwargs):
+    def new_window(self, comp):
         handle = SDL_CreateWindow(
-            b"Hello World",
-            SDL_WINDOWPOS_UNDEFINED,
-            SDL_WINDOWPOS_UNDEFINED,
-            w,
-            h,
-            SDL_WINDOW_SHOWN)
+            comp.name.encode('utf-8'),
+            SDL_WINDOWPOS_CENTERED,
+            SDL_WINDOWPOS_CENTERED,
+            comp.w,
+            comp.h,
+            SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)
 
-        window = Window(handle)
+        gl_context = SDL_GL_CreateContext(handle)
+        window = Window(handle, gl_context, comp)
+        window.make_current()
         self.windows[window.uid] = window
+        self.current_window = window
         return window
 
     def handle_event(self):
         while SDL_PollEvent(ctypes.byref(self.event)) != 0:
+
             if self.event.type == SDL_WINDOWEVENT:
                 wuid = self.event.window.windowID
                 self.current_window = self.windows.get(wuid)
@@ -281,9 +388,17 @@ class WindowManager:
                 self.running = False
                 break
 
+            if self.current_window:
+                self.current_window.handle_event(self.event)
+
+    def tick(self):
+        for _, w in self.windows.items():
+            w.tick()
+
     def run(self):
         while self.running:
             self.handle_event()
+            self.tick()
 
 
 class Text:
@@ -341,19 +456,16 @@ class Text:
 def main():
     with WindowManager() as manager:
         with ResourceManager() as resources:
-
             font = resources.font('DejaVuSansMono.ttf', 18)
 
-            window = manager.new_window()
-
+            window = manager.new_window(WindowComponent())
             renderer = window.renderer
             renderer.color = (123, 123, 123, 0)
 
-            txt = Text("ABC", color=(0, 0, 0), font=font)
-
-            renderer.clear()
-            txt.render(renderer)
-            renderer.present()
+            # txt = Text("ABC", color=(0, 0, 0), font=font)
+            # renderer.clear()
+            # txt.render(renderer)
+            # renderer.present()
 
             manager.run()
 
