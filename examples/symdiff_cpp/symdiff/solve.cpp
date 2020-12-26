@@ -1,5 +1,8 @@
 #include "solve.h"
-void counter (None t, None v) {
+
+namespace symdiff::solve {
+
+void counter (Expression t, Expression v) {
     if (isinstance(v, Multiplication)) {
     return std::tuple<>{div(t, v.right), v.left, true};
   };
@@ -23,7 +26,7 @@ void counter (None t, None v) {
   };
   return std::tuple<>{t, v, false};
 }
-Expression solve (Expression function, None value, None show_steps) {
+Expression solve (Expression function, int value, bool show_steps) {
   " Solve trivial Expression ";
   auto f = function.copy();
   auto s = ScalarReal(value);
@@ -33,6 +36,8 @@ Expression solve (Expression function, None value, None show_steps) {
       print(f, "=", s);
     };
     std::tuple<>{s, f, c} = counter(s, f);
-};
+  };
   return s;
 }
+
+} // symdiff::solve

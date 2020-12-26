@@ -1,7 +1,10 @@
-#ifndef None
-#define None
+#ifndef SYMDIFF_EXPRESSION_HEADER
+#define SYMDIFF_EXPRESSION_HEADER
 
 #include "math.h"
+
+namespace symdiff::Expression {
+
 struct _Expression {
 
   _Expression ();
@@ -268,4 +271,6 @@ Expression div (Expression up, Expression down);
 void scalar (None v);
 Expression sub (Expression l, Expression r);
 void apply_operator (None l, None r, None f);
+
+} // symdiff::Expression
 #endif

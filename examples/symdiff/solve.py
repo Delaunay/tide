@@ -5,7 +5,7 @@ from .Expression import *
 import math
 
 
-def counter(t, v):
+def counter(t: Expression, v: Expression):
     if isinstance(v, Multiplication):
         return div(t, v.right), v.left, True
     if isinstance(v, Addition):
@@ -24,7 +24,7 @@ def counter(t, v):
     return t, v, False
 
 
-def solve(function: Expression, value=0, show_steps=False) -> Expression:
+def solve(function: Expression, value: int = 0, show_steps: bool = False) -> Expression:
     """ Solve trivial Expression """
 
     f = function.copy()

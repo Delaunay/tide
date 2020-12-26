@@ -1,4 +1,7 @@
 #include "Expression.h"
+
+namespace symdiff::Expression {
+
 _Expression::_Expression () {
 
 }
@@ -754,3 +757,5 @@ void apply_operator (None l, None r, None f) {
   };
   return f(l, scalar(r));
 }
+
+} // symdiff::Expression

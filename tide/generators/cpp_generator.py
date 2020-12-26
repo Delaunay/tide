@@ -51,14 +51,16 @@ class ProjectFolder:
         if filename.startswith(self.prefix):
             return filename[len(self.prefix):].replace('.py', '').split('/'), True
 
-        return filename.replace('.py', '').split('/'), False
+        return [self.project_name] + filename.replace('.py', '').split('/'), True
 
     def module(self, module_path):
         return module_path.replace('.', '/') + '.h'
 
     def header_guard(self, filename):
         if not filename.startswith(self.root):
-            return None
+            return (self.project_name + '_' +
+                    filename.replace('/', '_').replace('.py', '')
+                    + '_HEADER').upper()
 
         name = filename[len(self.prefix):]
         return name.replace('.py', '').replace('/', '_').upper() + '_HEADER'
@@ -97,6 +99,7 @@ class CppGenerator:
         self.typing = dict()
         self.scope_depth = 0
 
+        print(self.namespaces)
         if ok:
             self.namespaces = '::'.join(namespace)
 
@@ -279,7 +282,13 @@ class CppGenerator:
         return f'std::set<>{elements}'
 
     def importfrom(self, obj: ast.ImportFrom, **kwargs):
-        print('todo')
+        print(obj.module)
+        print(obj.level)
+
+        if obj.level == 1:
+            self.header.append(f'#include "{obj.module.replace(".", "/")}.h"')
+        else:
+            self.header.append(f'#include <{obj.module.replace(".", "/")}.h>')
 
     def exec(self, obj, depth, **kwargs):
         try:
@@ -306,7 +315,7 @@ class CppGenerator:
 
         return f"""{idt}while ({test}) {{
         |{idt}{body};
-        |}}""".replace('        |', '')
+        |{idt}}}""".replace('        |', '')
 
     def str(self, obj: ast.Str, **kwargs):
         return f'"{obj.s}"'
