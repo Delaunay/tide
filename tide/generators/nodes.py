@@ -639,6 +639,9 @@ class Call(Expression):
     def __hash__(self):
         return hash(self.__repr__())
 
+@dataclass
+class Num:
+    n: float
 
 #  expr Constructor(FormattedValue, [Field(expr, value), Field(int, conversion, opt=True), Field(expr, format_spec, opt=True)])
 @dataclass
@@ -981,6 +984,11 @@ class Is(Operand):
 @dataclass
 class IsNot(Operand):
     pass
+
+
+@dataclass
+class NameConstant:
+    value: any
 
 
 #  cmpop Constructor(In, [])
