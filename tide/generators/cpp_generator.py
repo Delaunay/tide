@@ -6,7 +6,8 @@ reserved = {
     'import',
     'pass',
     'if',
-    'raise'
+    'raise',
+    'while'
 }
 
 unaryoperators = {
@@ -293,6 +294,19 @@ class CppGenerator:
             for f in self.function_stack:
                 print('function', f)
             raise e
+
+    def _while(self, obj: ast.While, depth, **kwargs):
+        test = self.exec(obj.test, depth=depth, **kwargs)
+        body = []
+        for b in obj.body:
+            body.append(self.exec(b, depth=depth + 1, **kwargs))
+
+        idt = '  ' * depth
+        body = f';\n  {idt}'.join(body)
+
+        return f"""{idt}while ({test}) {{
+        |{idt}{body};
+        |}}""".replace('        |', '')
 
     def str(self, obj: ast.Str, **kwargs):
         return f'"{obj.s}"'
