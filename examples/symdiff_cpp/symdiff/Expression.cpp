@@ -1,109 +1,106 @@
-#include "Expression.h"
+#include "expression.h"
 
-namespace symdiff::Expression {
+namespace symdiff::expression {
 
 _Expression::_Expression () {
 
 }
-_Expression::void __repr__ () {
+str _Expression::__repr__ () {
   return "FAIL";
 }
-_Expression::void __str__ () {
+str _Expression::__str__ () {
 
 }
-_Expression::bool __eq__ (Expression other) {
-      if (other == self) {
+bool _Expression::__eq__ (Expression other) {
+      if (other == this) {
       return true;
     };
   return false;
 }
-_Expression::void derivate (str x) {
+Expression _Expression::derivate (str x) {
   " derivate in respect of x";
-  return self;
+  return this;
 }
-_Expression::void is_scalar () {
+bool _Expression::is_scalar () {
   return false;
 }
-_Expression::void is_one () {
+bool _Expression::is_one () {
   return false;
 }
-_Expression::void is_nul () {
+bool _Expression::is_nul () {
   return false;
 }
-_Expression::void is_leaf () {
+bool _Expression::is_leaf () {
   return false;
 }
-_Expression::void eval (Dict variables) {
+Expression _Expression::eval (Dict variables) {
   " partially evaluate the expression";
 }
-_Expression::void full_eval (dict variables) {
+float _Expression::full_eval (Dict variables) {
   " fully evaluate the expression, every unknown must be specified";
 }
-_Expression::void __mul__ (Expression other) {
-  return apply_operator(self, other, mult);
+Expression _Expression::__mul__ (Expression other) {
+  return apply_operator(this, other, mult);
 }
-_Expression::void __add__ (Expression other) {
-  return apply_operator(self, other, add);
+Expression _Expression::__add__ (Expression other) {
+  return apply_operator(this, other, add);
 }
-_Expression::void __truediv__ (Expression other) {
-  return apply_operator(self, other, div);
+Expression _Expression::__truediv__ (Expression other) {
+  return apply_operator(this, other, div);
 }
-_Expression::void __pow__ (Expression other) {
-  return apply_operator(self, other, pow);
+Expression _Expression::__pow__ (Expression other) {
+  return apply_operator(this, other, pow);
 }
-_Expression::void __sub__ (Expression other) {
-  return apply_operator(self, other, sub);
+Expression _Expression::__sub__ (Expression other) {
+  return apply_operator(this, other, sub);
 }
-_Expression::void __neg__ () {
+Expression _Expression::__neg__ () {
   " return - self";
-  return mult(minus_one(), self);
+  return mult(minus_one(), this);
 }
-_Expression::void variables () {
+void _Expression::variables () {
   " Return a set of unknown the expression depend of";
   return set();
 }
-_Expression::void get_tree () {
+void _Expression::get_tree () {
   " Return Operation tree";
   return std::vector<>{};
 }
-_Expression::void apply_function (Callable function) {
+Expression _Expression::apply_function (str function) {
   " apply a function to the graph ";
-  return self;
+  return this;
 }
-_Expression::void copy () {
+Expression _Expression::copy () {
   " return a copy of the expression";
   return this->apply_function("copy");
 }
-_Expression::void simplify () {
+Expression _Expression::simplify () {
   return this->apply_function("simplify");
 }
-_Expression::void develop () {
+Expression _Expression::develop () {
   return this->apply_function("develop");
 }
-_Expression::void factorize () {
+Expression _Expression::factorize () {
   return this->apply_function("factorize");
 }
-_Expression::void cancel () {
+Expression _Expression::cancel () {
   " return the expression cancelling the current expression
             i.e x => 1/x     exp => log    x ** 2 => x ** 0.5 ";
-  return self;
+  return this;
 }
-_Expression::void primitive (str x) {
-  return self;
-}
-_Expression::void _print () {
+void _Expression::_print () {
       if (this->is_leaf()) {
       return this->__str__();
     };
   return "(" + this->__str__() + ")";
 }
-_Expression::void _id () {
+int _Expression::_id () {
   throw None;
 }
-_Expression::void __lt__ (Expression other) {
+bool _Expression::__lt__ (Expression other) {
   return other._id() < this->_id();
 }
-void reorder (Expression a, Expression b) {
+Tuple reorder (Expression a, Expression b) {
   auto ia = a._id();
   auto ib = b._id();
     if (ib < ia) {
@@ -118,63 +115,63 @@ void reorder (Expression a, Expression b) {
   return std::tuple<>{a, b};
 }
 _UnaryOperator::_UnaryOperator (Expression expr) {
-  Expression->__init__(self);
+  Expression->__init__(this);
   this->expr = expr;
 }
-_UnaryOperator::bool __eq__ (Expression other) {
-      if (other == self) {
+bool _UnaryOperator::__eq__ (Expression other) {
+      if (other == this) {
       return true;
     };
-      if (isinstance(other, type(self))) {
+      if (isinstance(other, type(this))) {
             if (other.expr == this->expr) {
         return true;
       };
     };
   return false;
 }
-_UnaryOperator::void variables () {
+void _UnaryOperator::variables () {
   return this->expr.variables();
 }
-_UnaryOperator::void get_tree () {
-  return std::vector<>{self} + this->expr.get_tree();
+void _UnaryOperator::get_tree () {
+  return std::vector<>{this} + this->expr.get_tree();
 }
 _BinaryOperator::_BinaryOperator (Expression left, Expression right) {
-  Expression->__init__(self);
+  Expression->__init__(this);
   this->left = left;
   this->right = right;
 }
-_BinaryOperator::bool __eq__ (Expression other) {
-      if (other == self) {
+bool _BinaryOperator::__eq__ (Expression other) {
+      if (other == this) {
       return true;
     };
-      if (isinstance(other, type(self))) {
+      if (isinstance(other, type(this))) {
             if (other.left == this->left && other.right == this->right) {
         return true;
       };
     };
   return false;
 }
-_BinaryOperator::void variables () {
+void _BinaryOperator::variables () {
   return this->left.variables().union(this->right.variables());
 }
-_BinaryOperator::void get_tree () {
-  return std::vector<>{self} + this->left.get_tree() + this->right.get_tree();
+void _BinaryOperator::get_tree () {
+  return std::vector<>{this} + this->left.get_tree() + this->right.get_tree();
 }
 _ScalarReal::_ScalarReal (float value) {
-  Expression->__init__(self);
+  Expression->__init__(this);
   this->value = value;
 }
-_ScalarReal::void __str__ () {
+str _ScalarReal::__str__ () {
   return str(this->value);
 }
-_ScalarReal::void __repr__ () {
+str _ScalarReal::__repr__ () {
   return "Scalar<" + str(this->value) + ">";
 }
-_ScalarReal::void __neg__ () {
+Expression _ScalarReal::__neg__ () {
   return scalar(- this->value);
 }
-_ScalarReal::void __eq__ (Expression other) {
-      if (other == self) {
+bool _ScalarReal::__eq__ (Expression other) {
+      if (other == this) {
       return true;
     };
       if (isinstance(other, ScalarReal) && this->value == other.value) {
@@ -182,111 +179,102 @@ _ScalarReal::void __eq__ (Expression other) {
     };
   return false;
 }
-_ScalarReal::void is_scalar () {
+bool _ScalarReal::is_scalar () {
   return true;
 }
-_ScalarReal::void is_one () {
+bool _ScalarReal::is_one () {
   return 1 == this->value;
 }
-_ScalarReal::void is_nul () {
+bool _ScalarReal::is_nul () {
   return 0 == this->value;
 }
-_ScalarReal::void is_leaf () {
+bool _ScalarReal::is_leaf () {
   return true;
 }
-_ScalarReal::Expression derivate (Expression x) {
+Expression _ScalarReal::derivate (Expression x) {
   return zero();
 }
-_ScalarReal::void eval (None variables) {
+void _ScalarReal::eval (Dict variables) {
       if (this->is_one()) {
       return one();
     };
       if (this->is_nul()) {
       return zero();
     };
-  return self;
+  return this;
 }
-_ScalarReal::Expression full_eval (Dict variables) {
+Expression _ScalarReal::full_eval (Dict variables) {
   return this->value;
 }
-_ScalarReal::void apply_function (None function) {
+Expression _ScalarReal::apply_function (str function) {
   return scalar(this->value);
 }
-_ScalarReal::void primitive (None x) {
-  return mult(self, x);
-}
-_ScalarReal::void _id () {
+int _ScalarReal::_id () {
   return 0;
 }
-void one () {
+Expression one () {
   return __one;
 }
-void zero () {
+Expression zero () {
   return __zero;
 }
-void minus_one () {
+Expression minus_one () {
   return __minus_one;
 }
-void two () {
+Expression two () {
   return __two;
 }
 _Unknown::_Unknown (str name, tuple size) {
-  Expression->__init__(self);
+  Expression->__init__(this);
   this->name = name;
   this->size = size;
 }
-_Unknown::void __repr__ () {
+str _Unknown::__repr__ () {
   return this->name + str(this->size);
 }
-_Unknown::void __hash__ () {
+str _Unknown::__hash__ () {
   return str.__hash__(this->name);
 }
-_Unknown::void __str__ () {
+str _Unknown::__str__ () {
   return this->name;
 }
-_Unknown::void _id () {
+int _Unknown::_id () {
   return 1;
 }
-_Unknown::void is_leaf () {
+bool _Unknown::is_leaf () {
   return true;
 }
-_Unknown::Expression derivate (Expression x) {
-      if (self == x) {
+Expression _Unknown::derivate (Expression x) {
+      if (this == x) {
       return one();
     };
   return zero();
 }
-_Unknown::Expression eval (None variables) {
-      if (contains(self, variables)) {
+Expression _Unknown::eval (Dict variables) {
+      if (contains(this, variables)) {
       return variables;
     };
-  return self;
+  return this;
 }
-_Unknown::Expression full_eval (None variables) {
+Expression _Unknown::full_eval (Dict variables) {
   return variables.full_eval(variables);
 }
-_Unknown::void variables () {
-  return std::set<>self;
-}
-_Unknown::void primitive (None x) {
-      if (self == x) {
-      return pow(mult(div(one(), two()), self), two());
-    };
-  return mult(self, x);
+void _Unknown::variables () {
+  return std::set<>this;
 }
 _Addition::_Addition (Expression left, Expression right) {
-  BinaryOperator->__init__(self, left, right);
+  BinaryOperator->__init__(this, left, right);
 }
-_Addition::void __str__ () {
+str _Addition::__str__ () {
   return str(this->left) + " + " + str(this->right);
 }
-_Addition::void __repr__ () {
+str _Addition::__repr__ () {
   return "+";
 }
-_Addition::Expression derivate (Expression x) {
+Expression _Addition::derivate (Expression x) {
   return add(this->left.derivate(x), this->right.derivate(x));
 }
-_Addition::Expression eval (None variables) {
+Expression _Addition::eval (Dict variables) {
   auto l = this->left.eval(variables);
   auto r = this->right.eval(variables);
       if (l.is_scalar() && r.is_scalar()) {
@@ -294,31 +282,28 @@ _Addition::Expression eval (None variables) {
     };
   return add(l, r);
 }
-_Addition::Expression full_eval (None variables) {
+Expression _Addition::full_eval (Dict variables) {
   return this->left.full_eval(variables) + this->right.full_eval(variables);
 }
-_Addition::void apply_function (None function) {
+void _Addition::apply_function (str function) {
   return add(getattr(this->left, function)(), getattr(this->right, function)());
 }
-_Addition::void primitive (None x) {
-  return add(this->left.primitive(x), this->right.primitive(x));
-}
-_Addition::void _id () {
+int _Addition::_id () {
   return 2;
 }
 _Subtraction::_Subtraction (Expression left, Expression right) {
-  BinaryOperator->__init__(self, left, right);
+  BinaryOperator->__init__(this, left, right);
 }
-_Subtraction::void __str__ () {
+str _Subtraction::__str__ () {
   return str(this->left) + " - " + str(this->right);
 }
-_Subtraction::void __repr__ () {
+str _Subtraction::__repr__ () {
   return "-";
 }
-_Subtraction::Expression derivate (Expression x) {
+Expression _Subtraction::derivate (Expression x) {
   return sub(this->left.derivate(x), this->right.derivate(x));
 }
-_Subtraction::Expression eval (None variables) {
+Expression _Subtraction::eval (Dict variables) {
   auto l = this->left.eval(variables);
   auto r = this->right.eval(variables);
       if (l.is_scalar() && r.is_scalar()) {
@@ -326,31 +311,28 @@ _Subtraction::Expression eval (None variables) {
     };
   return sub(l, r);
 }
-_Subtraction::Expression full_eval (None variables) {
+Expression _Subtraction::full_eval (Dict variables) {
   return this->left.full_eval(variables) - this->right.full_eval(variables);
 }
-_Subtraction::void apply_function (None function) {
+Expression _Subtraction::apply_function (str function) {
   return sub(getattr(this->left, function)(), getattr(this->right, function)());
 }
-_Subtraction::void primitive (None x) {
-  return sub(this->left.primitive(x), this->right.primitive(x));
-}
-_Subtraction::void _id () {
+int _Subtraction::_id () {
   return 3;
 }
 _Multiplication::_Multiplication (Expression left, Expression right) {
-  BinaryOperator->__init__(self, left, right);
+  BinaryOperator->__init__(this, left, right);
 }
-_Multiplication::void __str__ () {
+str _Multiplication::__str__ () {
   return this->left._print() + " * " + this->right._print();
 }
-_Multiplication::void __repr__ () {
+str _Multiplication::__repr__ () {
   return "*";
 }
-_Multiplication::Expression derivate (Expression x) {
+Expression _Multiplication::derivate (Expression x) {
   return add(mult(this->left, this->right.derivate(x)), mult(this->right, this->left.derivate(x)));
 }
-_Multiplication::Expression eval (None variables) {
+Expression _Multiplication::eval (Dict variables) {
   auto l = this->left.eval(variables);
   auto r = this->right.eval(variables);
       if (l.is_scalar() && r.is_scalar()) {
@@ -358,19 +340,19 @@ _Multiplication::Expression eval (None variables) {
     };
   return mult(l, r);
 }
-_Multiplication::Expression full_eval (None variables) {
+Expression _Multiplication::full_eval (Dict variables) {
   return this->left.full_eval(variables) * this->right.full_eval(variables);
 }
-_Multiplication::void apply_function (None function) {
+Expression _Multiplication::apply_function (str function) {
   return mult(getattr(this->left, function)(), getattr(this->right, function)());
 }
-_Multiplication::void copy () {
+Expression _Multiplication::copy () {
   return this->apply_function("copy");
 }
-_Multiplication::void simplify () {
+Expression _Multiplication::simplify () {
   return this->apply_function("simplify");
 }
-_Multiplication::void develop () {
+Expression _Multiplication::develop () {
       if (isinstance(this->right, Addition)) {
       return this->left * this->right.left + this->left * this->right.right;
     };
@@ -378,101 +360,92 @@ _Multiplication::void develop () {
       return this->right * this->left.left + this->right * this->left.right;
     };
 }
-_Multiplication::void primitive (None x) {
-
-}
-_Multiplication::void _id () {
+int _Multiplication::_id () {
   return 4;
 }
 _Exp::_Exp (Expression expr) {
-  UnaryOperator->__init__(self, expr);
+  UnaryOperator->__init__(this, expr);
 }
-_Exp::void __str__ () {
+str _Exp::__str__ () {
   return "exp(" + str(this->expr) + ")";
 }
-_Exp::void __repr__ () {
+str _Exp::__repr__ () {
   return "exp";
 }
-_Exp::Expression derivate (Expression x) {
-  return mult(this->expr.derivate(x), self);
+Expression _Exp::derivate (Expression x) {
+  return mult(this->expr.derivate(x), this);
 }
-_Exp::Expression eval (None variables) {
+Expression _Exp::eval (Dict variables) {
   auto l = this->expr.eval(variables);
       if (l.is_scalar()) {
       return scalar(math.exp(l.value));
     };
   return exp(l);
 }
-_Exp::Expression full_eval (None variables) {
+Expression _Exp::full_eval (Dict variables) {
   return math.exp(this->expr.full_eval(variables));
 }
-_Exp::void apply_function (None function) {
+void _Exp::apply_function (str function) {
   return exp(getattr(this->expr, function)());
 }
-_Exp::void cancel () {
+Expression _Exp::cancel () {
   return log(this->expr);
 }
-_Exp::void primitive (None x) {
-  return self;
-}
-_Exp::void _id () {
+int _Exp::_id () {
   return 5;
 }
 _Log::_Log (Expression expr) {
-  UnaryOperator->__init__(self, expr);
+  UnaryOperator->__init__(this, expr);
 }
-_Log::void __str__ () {
+str _Log::__str__ () {
   return "log(" + str(this->expr) + ")";
 }
-_Log::void __repr__ () {
+str _Log::__repr__ () {
   return "log";
 }
-_Log::Expression derivate (Expression x) {
+Expression _Log::derivate (Expression x) {
   return div(this->expr.derivate(x), this->expr);
 }
-_Log::Expression eval (None variables) {
+Expression _Log::eval (Dict variables) {
   auto l = this->expr.eval(variables);
       if (l.is_scalar()) {
       return scalar(math.log(l.value));
     };
   return log(l.value);
 }
-_Log::Expression full_eval (None variables) {
+Expression _Log::full_eval (Dict variables) {
   return math.log(this->expr.full_eval(variables));
 }
-_Log::void apply_function (None function) {
+Expression _Log::apply_function (str function) {
   return log(getattr(this->expr, function)());
 }
-_Log::void cancel () {
+Expression _Log::cancel () {
   return exp(this->expr);
 }
-_Log::void primitive (None x) {
-  throw None;
-}
-_Log::void _id () {
+int _Log::_id () {
   return 6;
 }
 _Divide::_Divide (Expression up, Expression down) {
-  BinaryOperator->__init__(self, up, down);
+  BinaryOperator->__init__(this, up, down);
 }
-_Divide::void __str__ () {
+str _Divide::__str__ () {
   return this->left._print() + " / " + this->right._print();
 }
-_Divide::void __repr__ () {
+str _Divide::__repr__ () {
   return "/";
 }
-_Divide::void up () {
+Expression _Divide::up () {
   return this->left;
 }
-_Divide::void down () {
+Expression _Divide::down () {
   return this->right;
 }
-_Divide::Expression derivate (Expression x) {
+Expression _Divide::derivate (Expression x) {
   auto a = mult(this->right, this->left.derivate(x));
   auto b = mult(this->left, this->right.derivate(x));
   return div(sub(a, b), pow(this->right, scalar(2)));
 }
-_Divide::Expression eval (None variables) {
+Expression _Divide::eval (Dict variables) {
   auto l = this->left.eval(variables);
   auto r = this->right.eval(variables);
       if (l.is_scalar() && r.is_scalar()) {
@@ -480,34 +453,34 @@ _Divide::Expression eval (None variables) {
     };
   return div(l, r);
 }
-_Divide::Expression full_eval (None variables) {
+Expression _Divide::full_eval (Dict variables) {
   return this->left.full_eval(variables) / this->right.full_eval(variables);
 }
-_Divide::void apply_function (None function) {
+Expression _Divide::apply_function (str function) {
   return div(getattr(this->left, function)(), getattr(this->right, function)());
 }
-_Divide::void _id () {
+int _Divide::_id () {
   return 7;
 }
 _Pow::_Pow (Expression expr, Expression power) {
-  BinaryOperator->__init__(self, expr, power);
+  BinaryOperator->__init__(this, expr, power);
 }
-_Pow::void power () {
+Expression _Pow::power () {
   return this->right;
 }
-_Pow::void expr () {
+Expression _Pow::expr () {
   return this->left;
 }
-_Pow::void __str__ () {
+str _Pow::__str__ () {
   return this->left._print() + " ^ " + this->right._print();
 }
-_Pow::void __repr__ () {
+str _Pow::__repr__ () {
   return "^";
 }
-_Pow::Expression derivate (Expression x) {
+Expression _Pow::derivate (Expression x) {
   return mult(mult(this->power(), this->expr().derivate(x)), pow(this->expr(), add(this->power(), minus_one())));
 }
-_Pow::Expression eval (None variables) {
+Expression _Pow::eval (Dict variables) {
   auto l = this->left.eval(variables);
   auto r = this->right.eval(variables);
       if (l.is_scalar() && r.is_scalar()) {
@@ -515,39 +488,35 @@ _Pow::Expression eval (None variables) {
     };
   return pow(l, r);
 }
-_Pow::Expression full_eval (None variables) {
+Expression _Pow::full_eval (Dict variables) {
   return pow(this->left.full_eval(variables), this->right.full_eval(variables));
 }
-_Pow::void apply_function (None function) {
+Expression _Pow::apply_function (str function) {
   return pow(getattr(this->left, function)(), getattr(this->right, function)());
 }
-_Pow::void primitive (None x) {
-  auto v = this->power() + one();
-  return mult(div(one(), v), pow(this->expr(), v));
-}
-_Pow::void _id () {
+int _Pow::_id () {
   return 8;
 }
-_MathConstant::_MathConstant (None name, None value) {
-  ScalarReal->__init__(self, value);
+_MathConstant::_MathConstant (str name, float value) {
+  ScalarReal->__init__(this, value);
   this->name = name;
 }
-_MathConstant::void __str__ () {
+str _MathConstant::__str__ () {
   return this->name;
 }
-_MathConstant::void __repr__ () {
+str _MathConstant::__repr__ () {
   return this->name;
 }
-_MathConstant::void copy () {
-  return self;
+void _MathConstant::copy () {
+  return this;
 }
-_MathConstant::void _id () {
+int _MathConstant::_id () {
   return 9;
 }
-void pi () {
+Expression pi () {
   return __pi;
 }
-void e () {
+Expression e () {
   return __euler;
 }
 Expression add (Expression l, Expression r) {
@@ -713,7 +682,7 @@ Expression div (Expression up, Expression down) {
   };
   return Divide(up, down);
 }
-void scalar (None v) {
+Expression scalar (float v) {
     if (0 == v) {
     return zero();
   };
@@ -751,11 +720,5 @@ Expression sub (Expression l, Expression r) {
   };
   return Subtraction(l, r);
 }
-void apply_operator (None l, None r, None f) {
-    if (isinstance(r, Expression)) {
-    return f(l, r);
-  };
-  return f(l, scalar(r));
-}
 
-} // symdiff::Expression
+} // symdiff::expression

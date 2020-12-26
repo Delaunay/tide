@@ -38,6 +38,11 @@ booloperator = {
     'or': '||',
 }
 
+libreplace = {
+    'math': ('cmath', 'system'),
+    'typing': ('', 'ignore'),
+}
+
 
 class ProjectFolder:
     """Class helper used to resolve project files"""
@@ -53,8 +58,21 @@ class ProjectFolder:
 
         return [self.project_name] + filename.replace('.py', '').split('/'), True
 
-    def module(self, module_path):
-        return module_path.replace('.', '/') + '.h'
+    def module(self, module_path, level=0):
+        print(f'Looking up {module_path}')
+        libname, libspace = libreplace.get(module_path, (None, None))
+
+        if libname is None:
+            name = module_path.replace('.', '/') + '.h'
+            return f'"{name}"'
+
+        if libname == '' and libspace == 'ignore':
+            return ''
+
+        if libspace == 'system':
+            return f'<{libname}>'
+
+        return f'"{libname}"'
 
     def header_guard(self, filename):
         if not filename.startswith(self.root):
@@ -96,7 +114,7 @@ class CppGenerator:
         # are we traversing inside __init__
         self.init_capture = False
         self.body_generation = False
-        self.typing = dict()
+        self.typing = dict(this='pointer')
         self.scope_depth = 0
 
         print(self.namespaces)
@@ -202,6 +220,7 @@ class CppGenerator:
         header_guard = self.project.header_guard(self.filename)
         self.header.append(f'#ifndef {header_guard}')
         self.header.append(f'#define {header_guard}\n')
+        self.header.append(f'#include "kiwi"')
 
         self.impl.append(f'#include "{self.filename.replace(".py", ".h")}"')
 
@@ -282,13 +301,9 @@ class CppGenerator:
         return f'std::set<>{elements}'
 
     def importfrom(self, obj: ast.ImportFrom, **kwargs):
-        print(obj.module)
-        print(obj.level)
-
-        if obj.level == 1:
-            self.header.append(f'#include "{obj.module.replace(".", "/")}.h"')
-        else:
-            self.header.append(f'#include <{obj.module.replace(".", "/")}.h>')
+        libname = self.project.module(obj.module, level=obj.level)
+        if libname:
+            self.header.append(f'#include {libname}')
 
     def exec(self, obj, depth, **kwargs):
         try:
@@ -337,6 +352,9 @@ class CppGenerator:
             self.exec(expr, depth, **kwargs)
 
     def name(self, obj: ast.Name, **kwargs):
+        if self.class_name() != '' and obj.id == 'self':
+            return 'this'
+
         return obj.id
 
     def binop(self, obj: ast.BinOp, **kwargs):
@@ -375,14 +393,15 @@ class CppGenerator:
 
         for alias in obj.names:
             file_name = self.project.module(alias.name)
-            self.header.append(f'#include "{file_name}"')
+            if file_name != '':
+                self.header.append(f'#include {file_name}')
 
-            # this should only be done in cpp files
-            # header should not use namespace shortcut to avoid them bleeding out of the project
-            if alias.asname is not None:
-                importpath = alias.name.replace('.', '::')
-                self.header.append(f'using {alias.asname} = {importpath};')
-                self.typing[alias.asname] = 'module'
+                # this should only be done in cpp files
+                # header should not use namespace shortcut to avoid them bleeding out of the project
+                if alias.asname is not None:
+                    importpath = alias.name.replace('.', '::')
+                    self.header.append(f'using {alias.asname} = {importpath};')
+                    self.typing[alias.asname] = 'module'
 
         return
 
@@ -419,6 +438,11 @@ class CppGenerator:
     def function_qualifier(self, obj):
         if self.is_static_method(obj):
             return 'static '
+
+        # all functions are virtual in python
+        class_name = self.class_name()
+        if class_name and obj.name != '__init__':
+            return 'virtual '
         return ''
 
     def class_name(self):
@@ -438,7 +462,7 @@ class CppGenerator:
     def attribute(self, obj: ast.Attribute, **kwargs):
         objexpr = self.exec(obj.value, **kwargs)
 
-        if self.init_capture and objexpr == 'self':
+        if self.init_capture and objexpr == 'this':
             return obj.attr
         elif objexpr == 'self':
             return f'this->{obj.attr}'
@@ -504,13 +528,28 @@ class CppGenerator:
         self.header.append("")
         self.init_capture = False
 
+    def function_name(self):
+        if not self.function_stack:
+            return ''
+
+        return self.function_stack[-1]
+
+    def exec_type(self, expr, **kwargs):
+        v = self.exec(expr, **kwargs)
+
+        if v is None:
+            return 'void'
+
+        if v and v[0] == '"':
+            v = v[1:-1]
+
+        return v
+
     def functiondef(self, obj: ast.FunctionDef, depth, **kwargs):
         if not self.namespaced:
             self.push_namespaces()
 
-        returntype = self.exec(obj.returns, depth, **kwargs)
-        if obj.returns is None:
-            returntype = 'void'
+        returntype = self.exec_type(obj.returns, depth=depth, **kwargs)
 
         name = obj.name
         with Stack(self.function_stack, name):
@@ -518,9 +557,12 @@ class CppGenerator:
 
             args = []
             for arg in obj.args.args[offset:]:
-                type = self.exec(arg.annotation, depth)
-                if type and type[0] == '"':
-                    type = type[1:-1]
+                type = self.exec_type(arg.annotation, depth=depth, **kwargs)
+
+                if type is None:
+                    print(f'{self.class_name()}::{self.function_name()} '
+                          f'type inference is not implemented for argument `{arg.arg}`')
+                    type = 'T'
 
                 args.append(f'{type} {arg.arg}')
 
@@ -528,28 +570,31 @@ class CppGenerator:
             qualifier = self.function_qualifier(obj)
 
             # Magic functions
+            proto_header = f'{returntype} {name} ({args})'
             proto_impl = f'{returntype} {name} ({args})'
+
             class_name = self.class_name()
+
             if class_name:
                 class_name = '_' + class_name
+                proto_impl = f'{returntype} {class_name}::{name} ({args})'
 
             if name == '__init__':
                 self.capture_members(obj, depth)
-                proto_impl = f'{class_name} ({args})'
+                proto_header = f'{class_name} ({args})'
+                proto_impl = f'{class_name}::{class_name} ({args})'
 
             elif name == '__del__':
-                proto_impl = f'~{class_name} ({args})'
+                proto_header = f'~{class_name} ({args})'
+                proto_impl = f'{class_name}::~{class_name} ({args})'
 
             idt = '  ' * len(self.class_stack)
-            self.header.append(f'{idt}{qualifier}{proto_impl};')
-
-            if class_name:
-                class_name = class_name + '::'
+            self.header.append(f'{idt}{qualifier}{proto_header};')
 
             if not self.impl_namespaced:
                 self.push_impl_namespaces()
 
-            self.impl.append(f'{class_name}{proto_impl} {{')
+            self.impl.append(f'{proto_impl} {{')
             self.function_body(obj, depth=depth+1, **kwargs)
             self.impl.append('}')
 
@@ -599,6 +644,9 @@ class CppGenerator:
         name = obj.name
         with Stack(self.class_stack, name):
             bases = self.getinheritance(obj, depth)
+            # Forward declaration
+            self.header.append(f"struct _{name};")
+            self.header.append(f"using {name} = std::shared_ptr<_{name}>;")
             self.header.append(f"struct _{name}{bases} {{")
 
             body = []
@@ -609,10 +657,9 @@ class CppGenerator:
             self.typing['_' + name] = 'value'
 
             self.header.append("};")
-            self.header.append(f"using {name} = std::shared_ptr<_{name}>")
             self.header.append(f"""template<class... Args>
             |{name} {name.lower()}(Args&&... args){{
-            |   return make_shared<_{name}>(std::forward(args)...);
+            |   return std::make_shared<_{name}>(std::forward(args)...);
             |}}""".replace('            |', ''))
 
 

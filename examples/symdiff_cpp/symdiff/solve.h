@@ -1,8 +1,9 @@
 #ifndef SYMDIFF_SOLVE_HEADER
 #define SYMDIFF_SOLVE_HEADER
 
-#include "Expression.h"
-#include "math.h"
+#include "kiwi"
+#include "expression.h"
+#include <cmath>
 
 namespace symdiff::solve {
 

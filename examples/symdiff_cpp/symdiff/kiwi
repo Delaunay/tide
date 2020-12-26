@@ -1,0 +1,6 @@
+#ifndef KIWI_SYSTEM_HEADER
+#define KIWI_SYSTEM_HEADER
+
+#include <memory>
+
+#endif

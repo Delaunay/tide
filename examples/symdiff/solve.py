@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 __author__ = 'Pierre Delaunay'
 
-from .Expression import *
+from .expression import *
 import math
 
 
