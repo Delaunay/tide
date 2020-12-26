@@ -2,5 +2,9 @@
 #define KIWI_SYSTEM_HEADER
 
 #include <memory>
+#include <string>
+
+using str = std::string;
+
 
 #endif

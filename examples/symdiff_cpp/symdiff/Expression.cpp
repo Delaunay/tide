@@ -64,7 +64,7 @@ void _Expression::variables () {
 }
 void _Expression::get_tree () {
   " Return Operation tree";
-  return std::vector<>{};
+  return std::make_array();
 }
 Expression _Expression::apply_function (str function) {
   " apply a function to the graph ";
@@ -104,15 +104,15 @@ Tuple reorder (Expression a, Expression b) {
   auto ia = a._id();
   auto ib = b._id();
     if (ib < ia) {
-    return std::tuple<>{a, b};
+    return std::make_tuple(a, b);
   };
     if (ib != ia) {
-    return std::tuple<>{b, a};
+    return std::make_tuple(b, a);
   };
     if (a.is_scalar() && b.is_scalar() && b.value > a.value) {
-    return std::tuple<>{b, a};
+    return std::make_tuple(b, a);
   };
-  return std::tuple<>{a, b};
+  return std::make_tuple(a, b);
 }
 _UnaryOperator::_UnaryOperator (Expression expr) {
   Expression->__init__(this);
@@ -133,7 +133,7 @@ void _UnaryOperator::variables () {
   return this->expr.variables();
 }
 void _UnaryOperator::get_tree () {
-  return std::vector<>{this} + this->expr.get_tree();
+  return std::make_array(this) + this->expr.get_tree();
 }
 _BinaryOperator::_BinaryOperator (Expression left, Expression right) {
   Expression->__init__(this);
@@ -155,7 +155,7 @@ void _BinaryOperator::variables () {
   return this->left.variables().union(this->right.variables());
 }
 void _BinaryOperator::get_tree () {
-  return std::vector<>{this} + this->left.get_tree() + this->right.get_tree();
+  return std::make_array(this) + this->left.get_tree() + this->right.get_tree();
 }
 _ScalarReal::_ScalarReal (float value) {
   Expression->__init__(this);
@@ -260,7 +260,7 @@ Expression _Unknown::full_eval (Dict variables) {
   return variables.full_eval(variables);
 }
 void _Unknown::variables () {
-  return std::set<>this;
+  return std::make_setthis;
 }
 _Addition::_Addition (Expression left, Expression right) {
   BinaryOperator->__init__(this, left, right);
@@ -520,7 +520,7 @@ Expression e () {
   return __euler;
 }
 Expression add (Expression l, Expression r) {
-  std::tuple<>{l, r} = reorder(l, r);
+  std::make_tuple(l, r) = reorder(l, r);
     if (l.is_nul()) {
     return r;
   };
@@ -559,7 +559,7 @@ Expression add (Expression l, Expression r) {
   return Addition(l, r);
 }
 Expression mult (Expression l, Expression r) {
-  std::tuple<>{l, r} = reorder(l, r);
+  std::make_tuple(l, r) = reorder(l, r);
     if (l.is_nul() || r.is_nul()) {
     return zero();
   };

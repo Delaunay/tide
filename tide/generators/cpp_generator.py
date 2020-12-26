@@ -117,7 +117,6 @@ class CppGenerator:
         self.typing = dict(this='pointer')
         self.scope_depth = 0
 
-        print(self.namespaces)
         if ok:
             self.namespaces = '::'.join(namespace)
 
@@ -126,7 +125,7 @@ class CppGenerator:
         for e in obj.elts:
             elements.append(self.exec(e, depth))
         elements = ', '.join(elements)
-        return f'std::tuple<>{{{elements}}}'
+        return f'std::make_tuple({elements})'
 
     def _raise(self, obj: ast.Raise, depth, **kwargs):
         if obj.exc:
@@ -146,7 +145,7 @@ class CppGenerator:
             elements.append(f'{{ {k}, {v} }}')
 
         elements = ', '.join(elements)
-        return f'std::unoredered_map<>{{{elements}}}'
+        return f'std::make_dict{{{elements}}}'
 
     def augassign(self, obj: ast.AugAssign, depth):
         value = self.exec(obj.value, depth)
@@ -298,7 +297,7 @@ class CppGenerator:
         for e in obj.elts:
             elements.append(self.exec(e, depth))
         elements = ', '.join(elements)
-        return f'std::set<>{elements}'
+        return f'std::make_set{elements}'
 
     def importfrom(self, obj: ast.ImportFrom, **kwargs):
         libname = self.project.module(obj.module, level=obj.level)
@@ -410,7 +409,7 @@ class CppGenerator:
         for e in obj.elts:
             elements.append(self.exec(e, **kwargs))
         elements = ', '.join(elements)
-        return f'std::vector<>{{{elements}}}'
+        return f'std::make_array({elements})'
 
     def is_nested_function(self):
         return len(self.function_stack) > 0
