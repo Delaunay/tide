@@ -33,6 +33,20 @@ compop = {
     'in': None
 }
 
+operators = {
+    'is': '==',
+    'lt': '<',
+    'gt': '>',
+    'lte': '<=',
+    'gte': '>=',
+    'noteq': '!=',
+    'eq': '==',
+    'mul': '*',
+    'add': '+',
+    'sub': '-',
+    'pow': None,
+}
+
 booloperator = {
     'and': '&&',
     'or': '||',
@@ -536,7 +550,7 @@ class CppGenerator:
 
     def annassign(self, obj: ast.AnnAssign, **kwargs):
         name = self.exec(obj.target, **kwargs)
-        type = self.exec(obj.annotation, **kwargs)
+        type = self.exec_type(obj.annotation, **kwargs)
 
         if self.init_capture:
             idt = '  '
@@ -592,9 +606,18 @@ class CppGenerator:
                 proto_header = f'~{class_name} ({args})'
                 proto_impl = f'{class_name}::~{class_name} ({args})'
 
-            elif name == '__eq__':
-                proto_header = f'{returntype} operator== ({args})'
-                proto_impl = f'{returntype} {class_name}::operator== ({args})'
+            elif name in ('__str__', '__repr__'):
+                pass
+            elif name.startswith('__') and name.endswith('__') and len(name) > 4:
+                py_op = name[2:-2]
+                cpp_op = operators.get(py_op)
+
+                if cpp_op is None:
+                    print(f'No CPP operator matching for {py_op}')
+
+                elif name:
+                    proto_header = f'{returntype} operator {cpp_op} ({args})'
+                    proto_impl = f'{returntype} {class_name}::operator {cpp_op} ({args})'
 
         return proto_header, proto_impl
 

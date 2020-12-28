@@ -11,7 +11,7 @@ str Expression::__repr__ () {
 str Expression::__str__ () {
 
 }
-bool Expression::operator== (Expression* other) {
+bool Expression::operator == (Expression* other) {
       if (other == this) {
       return true;
     };
@@ -39,10 +39,10 @@ Expression* Expression::eval (Dict variables) {
 float Expression::full_eval (Dict variables) {
   " fully evaluate the expression, every unknown must be specified";
 }
-Expression* Expression::__mul__ (Expression* other) {
+Expression* Expression::operator * (Expression* other) {
   return apply_operator(this, other, mult);
 }
-Expression* Expression::__add__ (Expression* other) {
+Expression* Expression::operator + (Expression* other) {
   return apply_operator(this, other, add);
 }
 Expression* Expression::__truediv__ (Expression* other) {
@@ -51,7 +51,7 @@ Expression* Expression::__truediv__ (Expression* other) {
 Expression* Expression::__pow__ (Expression* other) {
   return apply_operator(this, other, pow);
 }
-Expression* Expression::__sub__ (Expression* other) {
+Expression* Expression::operator - (Expression* other) {
   return apply_operator(this, other, sub);
 }
 Expression* Expression::__neg__ () {
@@ -97,7 +97,7 @@ void Expression::_print () {
 int Expression::_id () {
   throw None;
 }
-bool Expression::__lt__ (Expression* other) {
+bool Expression::operator < (Expression* other) {
   return other._id() < this->_id();
 }
 Tuple reorder (Expression* a, Expression* b) {
@@ -118,7 +118,7 @@ UnaryOperator::UnaryOperator (Expression* expr) {
   Expression.__init__(this);
   this->expr = expr;
 }
-bool UnaryOperator::operator== (Expression* other) {
+bool UnaryOperator::operator == (Expression* other) {
       if (other == this) {
       return true;
     };
@@ -140,7 +140,7 @@ BinaryOperator::BinaryOperator (Expression* left, Expression* right) {
   this->left = left;
   this->right = right;
 }
-bool BinaryOperator::operator== (Expression* other) {
+bool BinaryOperator::operator == (Expression* other) {
       if (other == this) {
       return true;
     };
@@ -170,7 +170,7 @@ str ScalarReal::__repr__ () {
 Expression* ScalarReal::__neg__ () {
   return scalar(- this->value);
 }
-bool ScalarReal::operator== (Expression* other) {
+bool ScalarReal::operator == (Expression* other) {
       if (other == this) {
       return true;
     };

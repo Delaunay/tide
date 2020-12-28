@@ -11,7 +11,7 @@ struct Expression {
   Expression ();
   virtual str __repr__ ();
   virtual str __str__ ();
-  virtual bool operator== (Expression* other);
+  virtual bool operator == (Expression* other);
   virtual Expression* derivate (str x);
   virtual bool is_scalar ();
   virtual bool is_one ();
@@ -19,11 +19,11 @@ struct Expression {
   virtual bool is_leaf ();
   virtual Expression* eval (Dict variables);
   virtual float full_eval (Dict variables);
-  virtual Expression* __mul__ (Expression* other);
-  virtual Expression* __add__ (Expression* other);
+  virtual Expression* operator * (Expression* other);
+  virtual Expression* operator + (Expression* other);
   virtual Expression* __truediv__ (Expression* other);
   virtual Expression* __pow__ (Expression* other);
-  virtual Expression* __sub__ (Expression* other);
+  virtual Expression* operator - (Expression* other);
   virtual Expression* __neg__ ();
   virtual void variables ();
   virtual void get_tree ();
@@ -35,23 +35,23 @@ struct Expression {
   virtual Expression* cancel ();
   virtual void _print ();
   virtual int _id ();
-  virtual bool __lt__ (Expression* other);
+  virtual bool operator < (Expression* other);
 };
 Tuple reorder (Expression* a, Expression* b);
 struct UnaryOperator: public Expression {
   Expression expr;
 
   UnaryOperator (Expression* expr);
-  virtual bool operator== (Expression* other);
+  virtual bool operator == (Expression* other);
   virtual void variables ();
   virtual void get_tree ();
 };
 struct BinaryOperator: public Expression {
-  "Expression*" left;
-  "Expression*" right;
+  Expression* left;
+  Expression* right;
 
   BinaryOperator (Expression* left, Expression* right);
-  virtual bool operator== (Expression* other);
+  virtual bool operator == (Expression* other);
   virtual void variables ();
   virtual void get_tree ();
 };
@@ -62,7 +62,7 @@ struct ScalarReal: public Expression {
   virtual str __str__ ();
   virtual str __repr__ ();
   virtual Expression* __neg__ ();
-  virtual bool operator== (Expression* other);
+  virtual bool operator == (Expression* other);
   virtual bool is_scalar ();
   virtual bool is_one ();
   virtual bool is_nul ();

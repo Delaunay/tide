@@ -21,7 +21,7 @@ struct Point {
   Point (float x, float y);
   float sum ();
   ~Point ();
-  bool operator== (Point const& other);
+  bool operator == (Point const& other);
   void other ();
   static float dist (Point a, Point b);
 };

@@ -15,7 +15,7 @@ float Point::sum () {
 Point::~Point () {
   return ;
 }
-bool Point::operator== (Point const& other) {
+bool Point::operator == (Point const& other) {
   return other.x == this->x && other.y == this->y;
 }
 void Point::other () {
