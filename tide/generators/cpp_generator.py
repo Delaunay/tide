@@ -229,7 +229,7 @@ class CppGenerator:
             if op is None and n == 'in':
                 return f'contains({left}, {comp})'
 
-        return f'{comp} {ops[0]} {left}'
+        return f'{left} {ops[0]} {comp}'
 
     def run(self, module):
         header_guard = self.project.header_guard(self.filename)
@@ -363,8 +363,73 @@ class CppGenerator:
         return f'{fun}({args})'
 
     def module(self, obj: ast.Module, **kwargs):
+        def main_guard(expr):
+            if isinstance(expr.test, pyast.Compare):
+                comp: ast.Compare = expr.test
+                op = comp.ops[0]
+                name = comp.left
+                value = comp.comparators[0]
+
+                comparing_op = isinstance(op, pyast.Eq)
+                comparing_name = isinstance(name, pyast.Name) and name.id == '__name__'
+                comparing_main = isinstance(value, pyast.Str) and value.s == '__main__'
+
+                return comparing_name and comparing_main and comparing_op
+
+            return False
+
         for expr in obj.body:
-            self.exec(expr, **kwargs)
+            top_level_expr = self.exec(expr, **kwargs)
+
+            # Make a new entry-point
+            if isinstance(expr, pyast.If) and main_guard(expr):
+                if expr.orelse is not None:
+                    print('Warning ignoring the else when generating a new entry point')
+
+                self.entry_point(expr.body)
+            elif top_level_expr != '' and top_level_expr is not None:
+                print('Generating init script')
+                self.module_init([])
+
+    def module_init(self, expr_body):
+        if not self.namespaced:
+            self.push_namespaces()
+
+        self.header.append('int __init__();')
+
+        if not self.impl_namespaced:
+            self.push_impl_namespaces()
+
+        self.impl.append('int __init__() {')
+        body = []
+        for b in expr_body:
+            s = self.exec(b)
+            body.append(s)
+
+        body = '  ' + ';\n  '.join(body) + ';'
+        self.impl.append(body)
+        self.impl.append('  return 0;')
+        self.impl.append('}')
+
+    def entry_point(self, expr_body):
+        if not self.namespaced:
+            self.push_namespaces()
+
+        self.header.append('int __main__(int argc, const char* argv[]);')
+
+        if not self.impl_namespaced:
+            self.push_impl_namespaces()
+
+        self.impl.append('int __main__(int argc, const char* argv[]) {')
+        body = []
+        for b in expr_body:
+            s = self.exec(b)
+            body.append(s)
+
+        body = '  ' + ';\n  '.join(body) + ';'
+        self.impl.append(body)
+        self.impl.append('  return 0;')
+        self.impl.append('}')
 
     def name(self, obj: ast.Name, **kwargs):
         if self.class_name() != '' and obj.id == 'self':
@@ -740,8 +805,6 @@ class ProjectConverter:
             module = pyast.parse(code, filename=file)
             header, impl = CppGenerator(self.project, file).run(module)
 
-            # os.makedirs(os.path.join(self.destination, self.project.project_name, file), exist_ok=True)
-
             path = os.path.join(self.destination, self.project.project_name)
             with open(os.path.join(path, file.replace('.py', '.cpp')), 'w') as implfile:
                 implfile.write(impl)
@@ -751,16 +814,14 @@ class ProjectConverter:
 
 
 if __name__ == '__main__':
-    converter = ProjectConverter(
-        'C:/Users/Newton/work/tide/examples/symdiff',
-        'C:/Users/Newton/work/tide/examples/out')
-
-    converter.run()
+    # converter = ProjectConverter(
+    #     'C:/Users/Newton/work/tide/examples/symdiff',
+    #     'C:/Users/Newton/work/tide/examples/out')
+    # converter.run()
 
     converter = ProjectConverter(
         'C:/Users/Newton/work/tide/examples/containers',
         'C:/Users/Newton/work/tide/examples/out')
-
     converter.run()
 
     # module = pyast.parse("""""".replace('    |', ''))

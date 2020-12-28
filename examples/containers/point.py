@@ -28,3 +28,7 @@ class Point:
     def dist(a: 'Point', b: 'Point') -> float:
         v = a - b
         return math.sqrt(v * v)
+
+
+if __name__ == '__main__':
+    p = Point(2.0, 1.0)

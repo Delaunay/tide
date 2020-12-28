@@ -25,6 +25,7 @@ struct Point {
   void other ();
   static float dist (Point a, Point b);
 };
+int __main__(int argc, const char* argv[]);
 
 } // containers::point
 #endif
