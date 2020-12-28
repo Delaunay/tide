@@ -120,10 +120,10 @@ class CppGenerator:
         if ok:
             self.namespaces = '::'.join(namespace)
 
-    def tuple(self, obj: ast.Tuple, depth, **kwargs):
+    def tuple(self, obj: ast.Tuple, **kwargs):
         elements = []
         for e in obj.elts:
-            elements.append(self.exec(e, depth))
+            elements.append(self.exec(e, **kwargs))
         elements = ', '.join(elements)
         return f'std::make_tuple({elements})'
 
@@ -137,26 +137,27 @@ class CppGenerator:
     def num(self, obj: ast.Num, **kwargs):
         return str(obj.n)
 
-    def dict(self, obj: ast.Dict, depth):
+    def dict(self, obj: ast.Dict, **kwargs):
         elements = []
         for k, v in zip(obj.keys, obj.values):
-            k = self.exec(k, depth)
-            v = self.exec(v, depth)
+            k = self.exec(k, **kwargs)
+            v = self.exec(v, **kwargs)
             elements.append(f'{{ {k}, {v} }}')
 
         elements = ', '.join(elements)
         return f'std::make_dict{{{elements}}}'
 
-    def augassign(self, obj: ast.AugAssign, depth):
-        value = self.exec(obj.value, depth)
-        target = self.exec(obj.target, depth)
+    def augassign(self, obj: ast.AugAssign, **kwargs):
+        value = self.exec(obj.value, **kwargs)
+        target = self.exec(obj.target, **kwargs)
 
         op = binop[self._getname(obj.op)]
         return f'{target} {op}= {value}'
 
-    def _if(self, obj: ast.If, depth=0, **kwargs):
-        test = self.exec(obj.test, depth)
+    def _if(self, obj: ast.If, **kwargs):
+        test = self.exec(obj.test, **kwargs)
 
+        depth = kwargs.get('depth', 0)
         base_idt = '  ' * depth
         if_idt = '  ' + base_idt
 
@@ -187,22 +188,23 @@ class CppGenerator:
         # Bool True/False
         return str(obj.value)
 
-    def unaryop(self, obj: ast.UnaryOp, depth):
+    def unaryop(self, obj: ast.UnaryOp, **kwargs):
         op = unaryoperators[self._getname(obj.op)]
-        expr = self.exec(obj.operand, depth)
+        expr = self.exec(obj.operand, **kwargs)
 
         return f'{op} {expr}'
 
-    def expr(self, obj: ast.Expr, depth):
-        return self.exec(obj.value, depth)
+    def expr(self, obj: ast.Expr, **kwargs):
+        return self.exec(obj.value, **kwargs)
 
-    def compare(self, obj: ast.Compare, depth,**kwargs):
+    def compare(self, obj: ast.Compare, **kwargs):
+        depth = kwargs.get('depth', 0)
         comp = []
         for b in obj.comparators:
-            comp.append(self.exec(b, depth))
+            comp.append(self.exec(b, **kwargs))
         comp = ', '.join(comp)
 
-        left = self.exec(obj.left, depth)
+        left = self.exec(obj.left, **kwargs)
 
         ops = []
         for o in obj.ops:
@@ -292,10 +294,10 @@ class CppGenerator:
     def subscript(self, obj: ast.Subscript, **kwargs):
         return self.exec(obj.value, **kwargs)
 
-    def set(self, obj: ast.Set, depth, **kwargs):
+    def set(self, obj: ast.Set, **kwargs):
         elements = []
         for e in obj.elts:
-            elements.append(self.exec(e, depth))
+            elements.append(self.exec(e, **kwargs))
         elements = ', '.join(elements)
         return f'std::make_set{elements}'
 
@@ -304,10 +306,10 @@ class CppGenerator:
         if libname:
             self.header.append(f'#include {libname}')
 
-    def exec(self, obj, depth, **kwargs):
+    def exec(self, obj, **kwargs):
         try:
             fun = getattr(self, self._getname(obj))
-            return fun(obj, depth=depth, **kwargs)
+            return fun(obj, **kwargs)
         except Exception as e:
             print(f'Error when processing {obj}')
 
@@ -346,9 +348,9 @@ class CppGenerator:
 
         return f'{fun}({args})'
 
-    def module(self, obj: ast.Module, depth, **kwargs):
+    def module(self, obj: ast.Module, **kwargs):
         for expr in obj.body:
-            self.exec(expr, depth, **kwargs)
+            self.exec(expr, **kwargs)
 
     def name(self, obj: ast.Name, **kwargs):
         if self.class_name() != '' and obj.id == 'self':
@@ -422,26 +424,54 @@ class CppGenerator:
 
     def is_static_method(self, obj: ast.FunctionDef, **kwargs):
         for decorator in obj.decorator_list:
-            dec = self.exec(decorator, **kwargs)
-            if dec == 'staticmethod':
+            if isinstance(decorator, pyast.Name) and decorator.id == 'staticmethod':
                 return True
 
         return False
 
-    def argument_offset(self, obj):
+    def is_virtual(self, obj: ast.FunctionDef, **kwargs):
+        classconfig = kwargs.get('classconfig', dict())
+
+        for decorator in obj.decorator_list:
+            if isinstance(decorator, pyast.Name) and decorator.id == 'virtual':
+                return True
+
+            if isinstance(decorator, pyast.Name) and decorator.id == 'novirtual':
+                return False
+
+        return classconfig.get('virtual', True)
+
+    def argument_offset(self, obj, **kwargs):
         """Ignore the first argument if in class"""
-        if self.is_nested_class() and not self.is_static_method(obj):
+        if self.is_nested_class() and not self.is_static_method(obj, **kwargs):
             return 1
         return 0
 
-    def function_qualifier(self, obj):
-        if self.is_static_method(obj):
+    def class_config(self, obj: ast.ClassDef):
+        config = dict()
+
+        for decorator in obj.decorator_list:
+            if isinstance(decorator, pyast.Call) and isinstance(decorator.func, pyast.Name) and decorator.func.id == 'struct':
+                for kwarg in decorator.keywords:
+                    if kwarg.arg == 'novirtual' and (
+                            isinstance(kwarg.value, pyast.Constant) or isinstance(kwarg.value, pyast.Num)):
+                        config['virtual'] = not (kwarg.value.n > 0)
+
+                    if kwarg.arg == 'virtual' and (
+                            isinstance(kwarg.value, pyast.Constant) or isinstance(kwarg.value, pyast.Num)):
+                        config['virtual'] = (kwarg.value.n > 0)
+
+        return config
+
+    def function_qualifier(self, obj, **kwargs):
+        if self.is_static_method(obj, **kwargs):
             return 'static '
 
         # all functions are virtual in python
         class_name = self.class_name()
-        if class_name and obj.name != '__init__':
+        if class_name and obj.name != '__init__' and self.is_virtual(obj, **kwargs):
             return 'virtual '
+
         return ''
 
     def class_name(self):
@@ -477,18 +507,18 @@ class CppGenerator:
                     return False
         return True
 
-    def assign(self, obj: ast.Assign, depth, **kwargs):
+    def assign(self, obj: ast.Assign, **kwargs):
         if self.init_capture:
             print(f'Type inference not implemented')
 
             for target in obj.targets:
-                name = self.exec(target, depth)
+                name = self.exec(target, **kwargs)
                 self.header.append(f'T {name};')
         else:
             names = []
             for target in obj.targets:
-                names.append(self.exec(target, depth))
-            expr = self.exec(obj.value, depth)
+                names.append(self.exec(target, **kwargs))
+            expr = self.exec(obj.value, **kwargs)
 
             if len(names) > 1:
                 names = ', '.join(names)
@@ -504,25 +534,25 @@ class CppGenerator:
                 type = 'auto '
             return f'{type}{names[0]} = {expr}'
 
-    def annassign(self, obj: ast.AnnAssign, depth):
-        name = self.exec(obj.target, depth)
-        type = self.exec(obj.annotation, depth)
+    def annassign(self, obj: ast.AnnAssign, **kwargs):
+        name = self.exec(obj.target, **kwargs)
+        type = self.exec(obj.annotation, **kwargs)
 
         if self.init_capture:
             idt = '  '
             self.header.append(f'{idt}{type} {name};')
 
         else:
-            expr = self.exec(obj.value, depth)
+            expr = self.exec(obj.value, **kwargs)
             type += ' '
             if not self.needs_decl([name]):
                 type = ''
             return f'{type}{name} = {expr}'
 
-    def capture_members(self, obj, depth):
+    def capture_members(self, obj, **kwargs):
         self.init_capture = True
         for b in obj.body:
-            self.exec(b, depth)
+            self.exec(b, **kwargs)
 
         self.header.append("")
         self.init_capture = False
@@ -544,6 +574,30 @@ class CppGenerator:
 
         return v
 
+    def magic_functions(self, obj, name, returntype, args, **kwargs):
+        # Magic functions
+        proto_header = f'{returntype} {name} ({args})'
+        proto_impl = f'{returntype} {name} ({args})'
+
+        class_name = self.class_name()
+        if class_name:
+            proto_impl = f'{returntype} {class_name}::{name} ({args})'
+
+            if name == '__init__':
+                self.capture_members(obj, **kwargs)
+                proto_header = f'{class_name} ({args})'
+                proto_impl = f'{class_name}::{class_name} ({args})'
+
+            elif name == '__del__':
+                proto_header = f'~{class_name} ({args})'
+                proto_impl = f'{class_name}::~{class_name} ({args})'
+
+            elif name == '__eq__':
+                proto_header = f'{returntype} operator== ({args})'
+                proto_impl = f'{returntype} {class_name}::operator== ({args})'
+
+        return proto_header, proto_impl
+
     def functiondef(self, obj: ast.FunctionDef, depth, **kwargs):
         if not self.namespaced:
             self.push_namespaces()
@@ -552,7 +606,7 @@ class CppGenerator:
 
         name = obj.name
         with Stack(self.function_stack, name):
-            offset = self.argument_offset(obj)
+            offset = self.argument_offset(obj, depth=depth, **kwargs)
 
             args = []
             for arg in obj.args.args[offset:]:
@@ -566,26 +620,9 @@ class CppGenerator:
                 args.append(f'{type} {arg.arg}')
 
             args = ', '.join(args)
-            qualifier = self.function_qualifier(obj)
+            qualifier = self.function_qualifier(obj, depth=depth, **kwargs)
 
-            # Magic functions
-            proto_header = f'{returntype} {name} ({args})'
-            proto_impl = f'{returntype} {name} ({args})'
-
-            class_name = self.class_name()
-
-            if class_name:
-                class_name = '_' + class_name
-                proto_impl = f'{returntype} {class_name}::{name} ({args})'
-
-            if name == '__init__':
-                self.capture_members(obj, depth)
-                proto_header = f'{class_name} ({args})'
-                proto_impl = f'{class_name}::{class_name} ({args})'
-
-            elif name == '__del__':
-                proto_header = f'~{class_name} ({args})'
-                proto_impl = f'{class_name}::~{class_name} ({args})'
+            proto_header, proto_impl = self.magic_functions(obj, name, returntype, args, depth=depth, **kwargs)
 
             idt = '  ' * len(self.class_stack)
             self.header.append(f'{idt}{qualifier}{proto_header};')
@@ -603,12 +640,12 @@ class CppGenerator:
     def indent(self):
         return '  ' * self.depth()
 
-    def function_body(self, obj: ast.FunctionDef, depth, **kwargs):
+    def function_body(self, obj: ast.FunctionDef, **kwargs):
         self.body_generation = True
 
         body = []
         for b in obj.body:
-            a = self.exec(b, depth, **kwargs)
+            a = self.exec(b, **kwargs)
 
             if a != '':
                 body.append(a)
@@ -622,10 +659,10 @@ class CppGenerator:
         self.impl.append(body)
         self.body_generation = False
 
-    def getinheritance(self, obj, depth):
+    def getinheritance(self, obj, **kwargs):
         bases = []
         for b in obj.bases:
-            bases.append(self.exec(b, depth))
+            bases.append(self.exec(b, **kwargs))
 
         if bases:
             return ': public ' + ', '.join(bases)
@@ -640,26 +677,28 @@ class CppGenerator:
         if not self.namespaced:
             self.push_namespaces()
 
+        config = self.class_config(obj)
+
         name = obj.name
         with Stack(self.class_stack, name):
-            bases = self.getinheritance(obj, depth)
+            bases = self.getinheritance(obj, **kwargs)
             # Forward declaration
-            self.header.append(f"struct _{name};")
-            self.header.append(f"using {name} = std::shared_ptr<_{name}>;")
-            self.header.append(f"struct _{name}{bases} {{")
+            # self.header.append(f"struct _{name};")
+            # self.header.append(f"using {name} = std::shared_ptr<_{name}>;")
+            self.header.append(f"struct {name}{bases} {{")
 
             body = []
             for b in obj.body:
-                body.append(self.exec(b, depth=depth + 1))
+                body.append(self.exec(b, depth=depth + 1, classconfig=config, **kwargs))
 
-            self.typing[name] = 'pointer'
-            self.typing['_' + name] = 'value'
+            # self.typing[name] = 'pointer'
+            self.typing[name] = 'value'
 
             self.header.append("};")
-            self.header.append(f"""template<class... Args>
-            |{name} {name.lower()}(Args&&... args){{
-            |   return std::make_shared<_{name}>(std::forward(args)...);
-            |}}""".replace('            |', ''))
+            # self.header.append(f"""template<class... Args>
+            # |{name} {name.lower()}(Args&&... args){{
+            # |   return std::make_shared<_{name}>(std::forward(args)...);
+            # |}}""".replace('            |', ''))
 
 
 class ProjectConverter:
@@ -691,7 +730,13 @@ class ProjectConverter:
 if __name__ == '__main__':
     converter = ProjectConverter(
         'C:/Users/Newton/work/tide/examples/symdiff',
-        'C:/Users/Newton/work/tide/examples/symdiff_cpp')
+        'C:/Users/Newton/work/tide/examples/out')
+
+    converter.run()
+
+    converter = ProjectConverter(
+        'C:/Users/Newton/work/tide/examples/containers',
+        'C:/Users/Newton/work/tide/examples/out')
 
     converter.run()
 

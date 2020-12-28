@@ -15,12 +15,12 @@ class Expression:
     def __str__(self) -> str:
         pass
 
-    def __eq__(self, other: 'Expression') -> bool:
+    def __eq__(self, other: 'Expression*') -> bool:
         if self is other:
             return True
         return False
 
-    def derivate(self, x: str) -> 'Expression':
+    def derivate(self, x: str) -> 'Expression*':
         """ derivate in respect of x"""
         return self
 
@@ -36,30 +36,30 @@ class Expression:
     def is_leaf(self) -> bool:
         return False
 
-    def eval(self, variables: Dict['Expression', 'Expression']) -> 'Expression':
+    def eval(self, variables: Dict['Expression*', 'Expression*']) -> 'Expression*':
         """ partially evaluate the expression"""
         pass
 
-    def full_eval(self, variables: Dict['Expression', 'Expression']) -> float:
+    def full_eval(self, variables: Dict['Expression*', 'Expression*']) -> float:
         """ fully evaluate the expression, every unknown must be specified"""
         pass
 
-    def __mul__(self, other: 'Expression') -> 'Expression':
+    def __mul__(self, other: 'Expression*') -> 'Expression*':
         return apply_operator(self, other, mult)
 
-    def __add__(self, other: 'Expression') -> 'Expression':
+    def __add__(self, other: 'Expression*') -> 'Expression*':
         return apply_operator(self, other, add)
 
-    def __truediv__(self, other: 'Expression') -> 'Expression':
+    def __truediv__(self, other: 'Expression*') -> 'Expression*':
         return apply_operator(self, other, div)
 
-    def __pow__(self, other: 'Expression') -> 'Expression':
+    def __pow__(self, other: 'Expression*') -> 'Expression*':
         return apply_operator(self, other, pow)
 
-    def __sub__(self, other: 'Expression') -> 'Expression':
+    def __sub__(self, other: 'Expression*') -> 'Expression*':
         return apply_operator(self, other, sub)
 
-    def __neg__(self) -> 'Expression':
+    def __neg__(self) -> 'Expression*':
         """ return - self"""
         return mult(minus_one(), self)
 
@@ -71,24 +71,24 @@ class Expression:
         """ Return Operation tree"""
         return []
 
-    def apply_function(self, function: str) -> 'Expression':
+    def apply_function(self, function: str) -> 'Expression*':
         """ apply a function to the graph """
         return self
 
-    def copy(self) -> 'Expression':
+    def copy(self) -> 'Expression*':
         """ return a copy of the expression"""
         return self.apply_function('copy')
 
-    def simplify(self) -> 'Expression':
+    def simplify(self) -> 'Expression*':
         return self.apply_function('simplify')
 
-    def develop(self) -> 'Expression':
+    def develop(self) -> 'Expression*':
         return self.apply_function('develop')
 
-    def factorize(self) -> 'Expression':
+    def factorize(self) -> 'Expression*':
         return self.apply_function('factorize')
 
-    def cancel(self) -> 'Expression':
+    def cancel(self) -> 'Expression*':
         """ return the expression cancelling the current expression
             i.e x => 1/x     exp => log    x ** 2 => x ** 0.5 """
         return self
@@ -101,11 +101,11 @@ class Expression:
     def _id(self) -> int:
         raise NotImplementedError()
 
-    def __lt__(self, other: 'Expression') -> bool:
+    def __lt__(self, other: 'Expression*') -> bool:
         return self._id() < other._id()
 
 
-def reorder(a: Expression, b: Expression) -> Tuple[Expression, Expression]:
+def reorder(a: 'Expression*', b: 'Expression*') -> Tuple['Expression*', 'Expression*']:
     ia = a._id()
     ib = b._id()
 
@@ -122,11 +122,11 @@ def reorder(a: Expression, b: Expression) -> Tuple[Expression, Expression]:
 
 class UnaryOperator(Expression):
 
-    def __init__(self, expr: Expression):
+    def __init__(self, expr: 'Expression*'):
         Expression.__init__(self)
         self.expr: Expression = expr
 
-    def __eq__(self, other: Expression) -> bool:
+    def __eq__(self, other: 'Expression*') -> bool:
         if self is other:
             return True
 
@@ -145,12 +145,12 @@ class UnaryOperator(Expression):
 
 class BinaryOperator(Expression):
 
-    def __init__(self, left: Expression, right: Expression):
+    def __init__(self, left: 'Expression*', right: 'Expression*'):
         Expression.__init__(self)
-        self.left: Expression = left
-        self.right: Expression = right
+        self.left: 'Expression*' = left
+        self.right: 'Expression*' = right
 
-    def __eq__(self, other: Expression) -> bool:
+    def __eq__(self, other: 'Expression*') -> bool:
         if self is other:
             return True
 
@@ -183,10 +183,10 @@ class ScalarReal(Expression):
     def __repr__(self) -> str:
         return 'Scalar<' + str(self.value) + '>'  #
 
-    def __neg__(self) -> Expression:
+    def __neg__(self) -> 'Expression*':
         return scalar(- self.value)
 
-    def __eq__(self, other: Expression) -> bool:
+    def __eq__(self, other: 'Expression*') -> bool:
         if self is other:
             return True
 
@@ -206,10 +206,10 @@ class ScalarReal(Expression):
     def is_leaf(self) -> bool:
         return True
 
-    def derivate(self, x: Expression) -> Expression:
+    def derivate(self, x: 'Expression*') -> 'Expression*':
         return zero()
 
-    def eval(self, variables: Dict[Expression, Expression]):
+    def eval(self, variables: Dict['Expression*', 'Expression*']):
         if self.is_one():
             return one()
         if self.is_nul():
@@ -217,10 +217,10 @@ class ScalarReal(Expression):
 
         return self
 
-    def full_eval(self, variables: Dict[Expression, Expression]) -> Expression:
+    def full_eval(self, variables: Dict['Expression*', 'Expression*']) -> 'Expression*':
         return self.value
 
-    def apply_function(self, function: str) -> Expression:
+    def apply_function(self, function: str) -> 'Expression*':
         return scalar(self.value)
 
     def _id(self) -> int:
@@ -233,19 +233,19 @@ __minus_one = ScalarReal(-1)
 __two = ScalarReal(2)
 
 
-def one() -> Expression:
+def one() -> 'Expression*':
     return __one
 
 
-def zero() -> Expression:
+def zero() -> 'Expression*':
     return __zero
 
 
-def minus_one() -> Expression:
+def minus_one() -> 'Expression*':
     return __minus_one
 
 
-def two() -> Expression:
+def two() -> 'Expression*':
     return __two
 
 
@@ -280,17 +280,17 @@ class Unknown(Expression):
     def is_leaf(self) -> bool:
         return True
 
-    def derivate(self, x: Expression) -> Expression:
+    def derivate(self, x: 'Expression*') -> 'Expression*':
         if x is self:
             return one()
         return zero()
 
-    def eval(self, variables: Dict[Expression, Expression]) -> Expression:
+    def eval(self, variables: Dict['Expression*', 'Expression*']) -> 'Expression*':
         if self in variables:
             return variables[self]
         return self
 
-    def full_eval(self, variables: Dict[Expression, Expression]) -> Expression:
+    def full_eval(self, variables: Dict['Expression*', 'Expression*']) -> 'Expression*':
         return variables[self].full_eval(variables)
 
     def variables(self):
@@ -299,7 +299,7 @@ class Unknown(Expression):
 
 class Addition(BinaryOperator):
 
-    def __init__(self, left: Expression, right: Expression):
+    def __init__(self, left: 'Expression*', right: 'Expression*'):
         BinaryOperator.__init__(self, left, right)
 
     def __str__(self) -> str:
@@ -308,10 +308,10 @@ class Addition(BinaryOperator):
     def __repr__(self) -> str:
         return '+'  # '(' + str(self.left) + ' + ' + str(self.right) + ')'
 
-    def derivate(self, x: Expression) -> Expression:
+    def derivate(self, x: 'Expression*') -> 'Expression*':
         return add(self.left.derivate(x), self.right.derivate(x))
 
-    def eval(self, variables: Dict[Expression, Expression]) -> Expression:
+    def eval(self, variables: Dict['Expression*', 'Expression*']) -> 'Expression*':
         l = self.left.eval(variables)
         r = self.right.eval(variables)
 
@@ -319,7 +319,7 @@ class Addition(BinaryOperator):
             return scalar(l.value + r.value)
         return add(l, r)
 
-    def full_eval(self, variables: Dict[Expression, Expression]) -> Expression:
+    def full_eval(self, variables: Dict['Expression*', 'Expression*']) -> 'Expression*':
         return self.left.full_eval(variables) + self.right.full_eval(variables)
 
     def apply_function(self, function: str):
@@ -330,7 +330,7 @@ class Addition(BinaryOperator):
 
 
 class Subtraction(BinaryOperator):
-    def __init__(self, left: Expression, right: Expression):
+    def __init__(self, left: 'Expression*', right: 'Expression*'):
         BinaryOperator.__init__(self, left, right)
 
     def __str__(self) -> str:
@@ -339,10 +339,10 @@ class Subtraction(BinaryOperator):
     def __repr__(self) -> str:
         return '-'  # '(' + str(self.left) + ' - ' + str(self.right) + ')'
 
-    def derivate(self, x: Expression) -> Expression:
+    def derivate(self, x: 'Expression*') -> 'Expression*':
         return sub(self.left.derivate(x), self.right.derivate(x))
 
-    def eval(self, variables: Dict[Expression, Expression]) -> Expression:
+    def eval(self, variables: Dict['Expression*', 'Expression*']) -> 'Expression*':
         l = self.left.eval(variables)
         r = self.right.eval(variables)
 
@@ -350,10 +350,10 @@ class Subtraction(BinaryOperator):
             return ScalarReal(l.value - r.value)
         return sub(l, r)
 
-    def full_eval(self, variables: Dict[Expression, Expression]) -> Expression:
+    def full_eval(self, variables: Dict['Expression*', 'Expression*']) -> 'Expression*':
         return self.left.full_eval(variables) - self.right.full_eval(variables)
 
-    def apply_function(self, function: str) -> Expression:
+    def apply_function(self, function: str) -> 'Expression*':
         return sub(getattr(self.left, function)(), getattr(self.right, function)())
 
     def _id(self) -> int:
@@ -362,7 +362,7 @@ class Subtraction(BinaryOperator):
 
 class Multiplication(BinaryOperator):
 
-    def __init__(self, left: Expression, right: Expression):
+    def __init__(self, left: 'Expression*', right: 'Expression*'):
         BinaryOperator.__init__(self, left, right)
 
     def __str__(self) -> str:
@@ -371,10 +371,10 @@ class Multiplication(BinaryOperator):
     def __repr__(self) -> str:
         return '*'  # '(' + str(self.left) + ') * (' + str(self.right) + ')'
 
-    def derivate(self, x: Expression) -> Expression:
+    def derivate(self, x: 'Expression*') -> 'Expression*':
         return add(mult(self.left, self.right.derivate(x)), mult(self.right, self.left.derivate(x)))
 
-    def eval(self, variables: Dict[Expression, Expression]) -> Expression:
+    def eval(self, variables: Dict['Expression*', 'Expression*']) -> 'Expression*':
         l = self.left.eval(variables)
         r = self.right.eval(variables)
 
@@ -382,19 +382,19 @@ class Multiplication(BinaryOperator):
             return scalar(l.value * r.value)
         return mult(l, r)
 
-    def full_eval(self, variables: Dict[Expression, Expression]) -> Expression:
+    def full_eval(self, variables: Dict['Expression*', 'Expression*']) -> 'Expression*':
         return self.left.full_eval(variables) * self.right.full_eval(variables)
 
-    def apply_function(self, function: str) -> Expression:
+    def apply_function(self, function: str) -> 'Expression*':
         return mult(getattr(self.left, function)(), getattr(self.right, function)())
 
-    def copy(self) -> Expression:
+    def copy(self) -> 'Expression*':
         return self.apply_function('copy')
 
-    def simplify(self) -> Expression:
+    def simplify(self) -> 'Expression*':
         return self.apply_function('simplify')
 
-    def develop(self) -> Expression:
+    def develop(self) -> 'Expression*':
         if isinstance(self.right, Addition):
             return self.left * self.right.left + self.left * self.right.right
 
@@ -407,7 +407,7 @@ class Multiplication(BinaryOperator):
 
 class Exp(UnaryOperator):
 
-    def __init__(self, expr: Expression):
+    def __init__(self, expr: 'Expression*'):
         UnaryOperator.__init__(self, expr)
 
     def __str__(self) -> str:
@@ -416,23 +416,23 @@ class Exp(UnaryOperator):
     def __repr__(self) -> str:
         return 'exp'   #(' + str(self.expr) + ')'
 
-    def derivate(self, x: Expression) -> Expression:
+    def derivate(self, x: 'Expression*') -> 'Expression*':
         return mult(self.expr.derivate(x), self)
 
-    def eval(self, variables: Dict[Expression, Expression]) -> Expression:
+    def eval(self, variables: Dict['Expression*', 'Expression*']) -> 'Expression*':
         l = self.expr.eval(variables)
 
         if l.is_scalar():
             return scalar(math.exp(l.value))
         return exp(l)
 
-    def full_eval(self, variables: Dict[Expression, Expression]) -> Expression:
+    def full_eval(self, variables: Dict['Expression*', 'Expression*']) -> 'Expression*':
         return math.exp(self.expr.full_eval(variables))
 
     def apply_function(self, function: str):
         return exp(getattr(self.expr, function)())
 
-    def cancel(self) -> Expression:
+    def cancel(self) -> 'Expression*':
         return log(self.expr)
 
     def _id(self) -> int:
@@ -440,7 +440,7 @@ class Exp(UnaryOperator):
 
 
 class Log(UnaryOperator):
-    def __init__(self, expr: Expression):
+    def __init__(self, expr: 'Expression*'):
         UnaryOperator.__init__(self, expr)
 
     def __str__(self) -> str:
@@ -449,10 +449,10 @@ class Log(UnaryOperator):
     def __repr__(self) -> str:
         return 'log'   # (' + str(self.expr) + ')'
 
-    def derivate(self, x: Expression) -> Expression:
+    def derivate(self, x: 'Expression*') -> 'Expression*':
         return div(self.expr.derivate(x), self.expr)
 
-    def eval(self, variables: Dict[Expression, Expression]) -> Expression:
+    def eval(self, variables: Dict['Expression*', 'Expression*']) -> 'Expression*':
         l = self.expr.eval(variables)
 
         if l.is_scalar():
@@ -460,13 +460,13 @@ class Log(UnaryOperator):
 
         return log(l.value)
 
-    def full_eval(self, variables: Dict[Expression, Expression]) -> Expression:
+    def full_eval(self, variables: Dict['Expression*', 'Expression*']) -> 'Expression*':
         return math.log(self.expr.full_eval(variables))
 
-    def apply_function(self, function: str) -> Expression:
+    def apply_function(self, function: str) -> 'Expression*':
         return log(getattr(self.expr, function)())
 
-    def cancel(self) -> Expression:
+    def cancel(self) -> 'Expression*':
         return exp(self.expr)
 
     def _id(self) -> int:
@@ -474,7 +474,7 @@ class Log(UnaryOperator):
 
 class Divide(BinaryOperator):
 
-    def __init__(self, up: Expression, down: Expression):
+    def __init__(self, up: 'Expression*', down: 'Expression*'):
         BinaryOperator.__init__(self, up, down)
 
     def __str__(self) -> str:
@@ -484,18 +484,18 @@ class Divide(BinaryOperator):
     def __repr__(self) -> str:
         return '/'  # '(' + str(self.left) + ') / (' + str(self.right) + ')'
 
-    def up(self) -> Expression:
+    def up(self) -> 'Expression*':
         return self.left
 
-    def down(self) -> Expression:
+    def down(self) -> 'Expression*':
         return self.right
 
-    def derivate(self, x: Expression) -> Expression:
+    def derivate(self, x: 'Expression*') -> 'Expression*':
         a = mult(self.right, self.left.derivate(x))
         b = mult(self.left, self.right.derivate(x))
         return div(sub(a, b), pow(self.right, scalar(2)))
 
-    def eval(self, variables: Dict[Expression, Expression]) -> Expression:
+    def eval(self, variables: Dict['Expression*', 'Expression*']) -> 'Expression*':
         l = self.left.eval(variables)
         r = self.right.eval(variables)
 
@@ -504,10 +504,10 @@ class Divide(BinaryOperator):
 
         return div(l, r)
 
-    def full_eval(self, variables: Dict[Expression, Expression]) -> Expression:
+    def full_eval(self, variables: Dict['Expression*', 'Expression*']) -> 'Expression*':
         return self.left.full_eval(variables) / self.right.full_eval(variables)
 
-    def apply_function(self, function: str) -> Expression:
+    def apply_function(self, function: str) -> 'Expression*':
         return div(getattr(self.left, function)(), getattr(self.right, function)())
 
     def _id(self) -> int:
@@ -515,13 +515,13 @@ class Divide(BinaryOperator):
 
 class Pow(BinaryOperator):
 
-    def __init__(self, expr: Expression, power: Expression):
+    def __init__(self, expr: 'Expression*', power: 'Expression*'):
         BinaryOperator.__init__(self, expr, power)
 
-    def power(self) -> Expression:
+    def power(self) -> 'Expression*':
         return self.right
 
-    def expr(self) -> Expression:
+    def expr(self) -> 'Expression*':
         return self.left
 
     def __str__(self) -> str:
@@ -530,10 +530,10 @@ class Pow(BinaryOperator):
     def __repr__(self) -> str:
         return '^'  # '(' + str(self.left) + ') ^ (' + str(self.right) + ')'
 
-    def derivate(self, x: Expression) -> Expression:
+    def derivate(self, x: 'Expression*') -> 'Expression*':
         return mult(mult(self.power(), self.expr().derivate(x)), pow(self.expr(), add(self.power(), minus_one())))
 
-    def eval(self, variables: Dict[Expression, Expression]) -> Expression:
+    def eval(self, variables: Dict['Expression*', 'Expression*']) -> 'Expression*':
         l = self.left.eval(variables)
         r = self.right.eval(variables)
 
@@ -541,10 +541,10 @@ class Pow(BinaryOperator):
             return scalar(l.value ** r.value)
         return pow(l, r)
 
-    def full_eval(self, variables: Dict[Expression, Expression]) -> Expression:
+    def full_eval(self, variables: Dict['Expression*', 'Expression*']) -> 'Expression*':
         return self.left.full_eval(variables) ** self.right.full_eval(variables)
 
-    def apply_function(self, function: str) -> Expression:
+    def apply_function(self, function: str) -> 'Expression*':
         return pow(getattr(self.left, function)(), getattr(self.right, function)())
 
     def _id(self) -> int:
@@ -574,18 +574,18 @@ __euler = MathConstant('e', 2.718281828459045)
 __pi = MathConstant('pi', 3.141592653589793)
 
 
-def pi() -> Expression:
+def pi() -> 'Expression*':
     return __pi
 
 
-def e() -> Expression:
+def e() -> 'Expression*':
     return __euler
 
 
 #
 #   Helper function
 #       Those make trivial simplification
-def add(l: Expression, r: Expression) -> Expression:
+def add(l: 'Expression*', r: 'Expression*') -> 'Expression*':
     l, r = reorder(l, r)
 
     if l.is_nul():
@@ -622,7 +622,7 @@ def add(l: Expression, r: Expression) -> Expression:
     return Addition(l, r)
 
 
-def mult(l: Expression, r: Expression) -> Expression:
+def mult(l: 'Expression*', r: 'Expression*') -> 'Expression*':
     l, r = reorder(l, r)
 
     if l.is_nul() or r.is_nul():
@@ -663,7 +663,7 @@ def mult(l: Expression, r: Expression) -> Expression:
     return Multiplication(l, r)
 
 
-def exp(expr: Expression) -> Expression:
+def exp(expr: 'Expression*') -> 'Expression*':
 
     if expr.is_nul():
         return one()
@@ -677,7 +677,7 @@ def exp(expr: Expression) -> Expression:
     return Exp(expr)
 
 
-def pow(expr: Expression, power: Expression) -> Expression:
+def pow(expr: 'Expression*', power: 'Expression*') -> 'Expression*':
 
     if power.is_nul():
         return one()
@@ -694,7 +694,7 @@ def pow(expr: Expression, power: Expression) -> Expression:
     return Pow(expr, power)
 
 
-def log(expr: Expression) -> Expression:
+def log(expr: 'Expression*') -> 'Expression*':
 
     if expr.is_one():
         return zero()
@@ -708,7 +708,7 @@ def log(expr: Expression) -> Expression:
     return Log(expr)
 
 
-def div(up: Expression, down: Expression) -> Expression:
+def div(up: 'Expression*', down: 'Expression*') -> 'Expression*':
     if down.is_one():
         return up
 
@@ -749,7 +749,7 @@ def div(up: Expression, down: Expression) -> Expression:
     return Divide(up, down)
 
 
-def scalar(v: float) -> Expression:
+def scalar(v: float) -> 'Expression*':
     if v == 0:
         return zero()
     if v == 1:
@@ -762,7 +762,7 @@ def scalar(v: float) -> Expression:
     return ScalarReal(v)
 
 
-def sub(l: Expression, r: Expression) -> Expression:
+def sub(l: 'Expression*', r: 'Expression*') -> 'Expression*':
 
     if l == r:
         return zero()

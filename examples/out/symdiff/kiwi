@@ -1,0 +1,50 @@
+#ifndef KIWI_SYSTEM_HEADER
+#define KIWI_SYSTEM_HEADER
+
+#include <memory>
+#include <string>
+
+using str = std::string;
+
+template <typename T>
+class has_repr
+{
+    typedef char one;
+    struct two { char x[2]; };
+
+    template <typename C> static one test( decltype(&C::repr) ) ;
+    template <typename C> static two test(...);
+
+public:
+    enum { value = sizeof(test<T>(0)) == sizeof(char) };
+};
+
+template<typename T, int repr>
+struct _Repr {
+    str repr(T const& obj) {
+        return obj.__repr__();
+    }
+};
+
+template<typename T>
+struct _Repr<T, 0> {
+    static str repr(T const& obj) {
+        return typeid(obj).name();
+    }
+};
+
+template<typename T>
+struct _Repr<T, 1> {
+    static str repr(T const& obj) {
+        return obj.__repr__();
+    }
+};
+
+template<typename T>
+str repr(T const& obj) {
+    return _Rep<T, has_repr<T>::value>::repr(T);
+}
+
+
+
+#endif
