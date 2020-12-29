@@ -40,7 +40,7 @@ class CppGenerator:
         if class_name or function:
             entity = f' {class_name}::{function}'
 
-        print(f'{self.project.project_name}/{self.filename}{diagnostic}{entity}', *args, **kwargs)
+        print(f'{self.project.project_name}/{self.filename}{diagnostic}{entity} -', *args, **kwargs)
 
     def tuple(self, obj: ast.Tuple, **kwargs):
         elements = []
@@ -129,7 +129,7 @@ class CppGenerator:
         left = self.exec(obj.left, **kwargs)
 
         ops = []
-        for o in obj.ops:
+        for o in obj.ops[0]:
             n = self._getname(o)
             op = compop[n]
             ops.append(op)

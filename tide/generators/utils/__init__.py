@@ -52,6 +52,13 @@ booloperator = {
 libreplace = {
     'math': ('cmath', 'system'),
     'typing': ('', 'ignore'),
+    'tide.runtime.kiwi': ('', 'ignore')
+}
+
+builtintypes = {
+    'int': int,
+    'str': str,
+    'float': float
 }
 
 

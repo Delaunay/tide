@@ -2,7 +2,6 @@
 #define CONTAINERS_POINT_HEADER
 
 #include "kiwi"
-#include "tide/runtime/kiwi.h"
 #include "myproject/math.h"
 using math = myproject::math;
 

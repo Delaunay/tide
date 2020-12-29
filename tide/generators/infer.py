@@ -2,14 +2,26 @@ import ast as pyast
 from typing import *
 
 import tide.generators.nodes as ast
-from tide.generators.utils import ProjectFolder, Stack
-
+from tide.generators.utils import ProjectFolder
+from tide.generators.utils import reserved, builtintypes
 
 class KiwiType:
     pass
 
+class MetaType:
+    def __init__(self):
+        self.clues= []
 
-NoneType = KiwiType
+    def add_clue(self, clue):
+        self.clues.append(clue)
+
+
+class NoneType(KiwiType):
+    pass
+
+
+class TypeType(KiwiType):
+    pass
 
 
 class StructType(KiwiType):
@@ -22,18 +34,73 @@ class UnionType(KiwiType):
         self.types = types
 
 
+def get_type(code):
+    import ast
+    module = ast.parse(code)
+    inferrer = TypeInference(ProjectFolder('.'), '')
+    _, type = inferrer.exec(module.body[0])
+    return type
+
+
+class TypingContext:
+    def __init__(self, visitor, parent=None, depth=0):
+        self.name = 'root'
+        self.visitor = visitor
+        self.parent = parent
+        self.depth = depth
+        self.scope = dict()
+
+    def __setitem__(self, key, value):
+        self.scope[key] = value
+
+    def __enter__(self):
+        new_context = TypingContext(self.visitor, self, self.depth + 1)
+        self.visitor.typing_context = new_context
+        return new_context
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.visitor.typing_context = self
+
+    def __getitem__(self, item):
+        if self.parent is None or item in self.scope:
+            return self.scope[item]
+        return self.parent[item]
+
+    def get(self, item, default=None):
+        if self.parent is None or item in self.scope:
+            return self.scope.get(item, default)
+        return self.parent.get(item, default)
+
+
 class TypeInference:
     def __init__(self, project: ProjectFolder, filename):
         self.project = project
         self.filename = filename
+        self.typing_context = TypingContext(self)
+
+    @staticmethod
+    def _getname(obj):
+        name = type(obj).__name__.lower()
+        if name in reserved:
+            name = '_' + name
+        return name
 
     def tuple(self, obj: ast.Tuple, **kwargs):
+        """
+        Examples
+        --------
+        >>> import ast
+        >>> get_type("(0, 1, 2.0, '123')")
+        typing.Tuple[int, int, float, str]
+        """
         types = []
         for e in obj.elts:
             value, type = self.exec(e, **kwargs)
             types.append(type)
 
-        return obj, Tuple[*types]
+        type = Tuple[()]
+        type.__args__ = tuple(types)
+        return obj, type
 
     def _raise(self, obj: ast.Raise, depth, **kwargs):
         return obj, None
@@ -50,95 +117,93 @@ class TypeInference:
     def infer_container(self, obj, **kwargs):
         types = []
         for e in obj.elts:
-            _, type = self.exec(e, **kwargs)
-            types.append(type)
+            _, element_type = self.exec(e, **kwargs)
+            types.append(element_type)
 
         first = types[0]
-        for type in types:
-            if isinstance(type, isinstance(first)):
-                print(f'warning type mismatch {type} != {first}')
+        for element_type in types:
+            if isinstance(element_type, first):
+                print(f'warning type mismatch {element_type} != {first}')
 
         return obj, first
 
     def set(self, obj: ast.Set, **kwargs):
+        """
+        Examples
+        --------
+        >>> import ast
+        >>> get_type(
+        ... "{0, 1}"
+        ... )
+        typing.Set[int]
+        """
         _, t = self.infer_container(obj, **kwargs)
         return obj, Set[t]
 
     def list(self, obj: ast.List, **kwargs):
+        """
+        Examples
+        --------
+        >>> import ast
+        >>> get_type(
+        ... "[0, 1]"
+        ... )
+        typing.List[int]
+        """
         _, t = self.infer_container(obj, **kwargs)
         return obj, List[t]
 
     def dict(self, obj: ast.Dict, **kwargs):
-        elements = []
+        """
+        Examples
+        --------
+        >>> import ast
+        >>> get_type(
+        ... "{'a': 1, 'b': 2}"
+        ... )
+        typing.Dict[str, int]
+        """
+        types = []
         for k, v in zip(obj.keys, obj.values):
-            k = self.exec(k, **kwargs)
-            v = self.exec(v, **kwargs)
-            elements.append(f'{{ {k}, {v} }}')
+            _, key_type = self.exec(k, **kwargs)
+            _, value_type = self.exec(v, **kwargs)
+            types.append((key_type, value_type))
 
-        elements = ', '.join(elements)
-        return f'std::make_dict{{{elements}}}'
+        first = types[0]
+        for kt, vt in types:
+            if isinstance(kt, first[0]):
+                print(f'warning type mismatch {kt} != {first[0]}')
+
+            if isinstance(vt, first[1]):
+                print(f'warning type mismatch {vt} != {first[0]}')
+
+        return obj, Dict[first[0], first[1]]
 
     def augassign(self, obj: ast.AugAssign, **kwargs):
-        value = self.exec(obj.value, **kwargs)
-        target = self.exec(obj.target, **kwargs)
-
-        op = binop[self._getname(obj.op)]
-        return f'{target} {op}= {value}'
+        # might not need to infer this because an assign needed to be there before
+        # value, _ = self.exec(obj.value, **kwargs)
+        _, type = self.exec(obj.target, **kwargs)
+        return obj, type
 
     def _if(self, obj: ast.If, **kwargs):
-        test = self.exec(obj.test, **kwargs)
-
-        depth = kwargs.get('depth', 0)
-        base_idt = '  ' * depth
-        if_idt = '  ' + base_idt
-
-        body = []
-        for b in obj.body:
-            body.append(self.exec(b, depth=depth + 1))
-        body = f';\n{if_idt}'.join(body)
-
-        orelse = ''
-        if obj.orelse:
-            orelse = []
-            for b in obj.orelse:
-                orelse.append(self.exec(b, depth=depth + 1))
-            orelse = f';\n{if_idt}'.join(orelse)
-            orelse = f' else {{\n{if_idt}{orelse};\n{base_idt}}}'
-
-        return \
-            f"""{base_idt}if ({test}) {{
-        |{if_idt}{body};
-        |{base_idt}}}{orelse}""".replace('        |', '')
-
+        return obj, None
 
     def unaryop(self, obj: ast.UnaryOp, **kwargs):
-        op = unaryoperators[self._getname(obj.op)]
-        expr = self.exec(obj.operand, **kwargs)
-
-        return f'{op} {expr}'
+        _, type = self.exec(obj.operand, **kwargs)
+        return obj, type
 
     def expr(self, obj: ast.Expr, **kwargs):
-        return self.exec(obj.value, **kwargs)
+        _, t = self.exec(obj.value, **kwargs)
+        return obj, t
 
     def compare(self, obj: ast.Compare, **kwargs):
-        depth = kwargs.get('depth', 0)
-        comp = []
+        _, lhs_type = self.exec(obj.left, **kwargs)
+
         for b in obj.comparators:
-            comp.append(self.exec(b, **kwargs))
-        comp = ', '.join(comp)
+            _, rhs_type = self.exec(b, **kwargs)
 
-        left = self.exec(obj.left, **kwargs)
-
-        ops = []
-        for o in obj.ops:
-            n = self._getname(o)
-            op = compop[n]
-            ops.append(op)
-
-            if op is None and n == 'in':
-                return f'contains({left}, {comp})'
-
-        return f'{left} {ops[0]} {comp}'
+        # operator...
+        return obj, bool
 
     def run(self, module):
         self.exec(module, depth=0)
@@ -147,12 +212,11 @@ class TypeInference:
         return obj, bool
 
     def subscript(self, obj: ast.Subscript, **kwargs):
-        return self.exec(obj.value, **kwargs)
+        _, type = self.exec(obj.value, **kwargs)
+        return obj, type
 
     def importfrom(self, obj: ast.ImportFrom, **kwargs):
-        libname = self.project.module(obj.module, level=obj.level)
-        if libname:
-            self.header.append(f'#include {libname}')
+        return obj, None
 
     def exec(self, obj, **kwargs):
         try:
@@ -160,156 +224,92 @@ class TypeInference:
             return fun(obj, **kwargs)
         except Exception as e:
             print(f'Error when processing {obj}')
-
-            for c in self.class_stack:
-                print('class', c)
-
-            for f in self.function_stack:
-                print('function', f)
             raise e
 
-    def _while(self, obj: ast.While, depth, **kwargs):
-        test = self.exec(obj.test, depth=depth, **kwargs)
-        body = []
+    def _while(self, obj: ast.While, **kwargs):
         for b in obj.body:
-            body.append(self.exec(b, depth=depth + 1, **kwargs))
+            self.exec(b, **kwargs)
+        return obj, None
 
-        idt = '  ' * depth
-        body = f';\n  {idt}'.join(body)
-
-        return f"""{idt}while ({test}) {{
-        |{idt}{body};
-        |{idt}}}""".replace('        |', '')
-
-    def _pass(self, obj, **kwargs):
+    def _pass(self, obj: ast.Pass, **kwargs):
         return obj, None
 
     def call(self, obj: ast.Call, **kwargs):
-        fun = self.exec(obj.func, **kwargs)
-        args = []
-        for arg in obj.args:
-            args.append(self.exec(arg, **kwargs))
-        args = ', '.join(args)
+        fun, callable_type = self.exec(obj.func, **kwargs)
+        arg_types = callable_type.__args__[:-1]
+        return_type = callable_type.__args__[-1]
 
-        return f'{fun}({args})'
+        args = []
+        for arg, expected_type in zip(obj.args, arg_types):
+            _, arg_type = self.exec(arg, expected_type=expected_type, **kwargs)
+            args.append(arg_type)
+
+            if not self.typecheck(arg_type, expected_type):
+                print('mistyping')
+
+        # Python nor C++ supports partial call natively
+        return obj, return_type
 
     def module(self, obj: ast.Module, **kwargs):
-        def main_guard(expr):
-            if isinstance(expr.test, pyast.Compare):
-                comp: ast.Compare = expr.test
-                op = comp.ops[0]
-                name = comp.left
-                value = comp.comparators[0]
-
-                comparing_op = isinstance(op, pyast.Eq)
-                comparing_name = isinstance(name, pyast.Name) and name.id == '__name__'
-                comparing_main = isinstance(value, pyast.Str) and value.s == '__main__'
-
-                return comparing_name and comparing_main and comparing_op
-
-            return False
-
         for expr in obj.body:
-            top_level_expr = self.exec(expr, **kwargs)
-
-            # Make a new entry-point
-            if isinstance(expr, pyast.If) and main_guard(expr):
-                if len(expr.orelse) > 0:
-                    print('Warning ignoring the else when generating a new entry point')
-
-                self.entry_point(expr.body)
-
-            elif isinstance(expr, pyast.Assign):
-                self.assign_global(expr)
-
-            elif isinstance(expr, pyast.AnnAssign):
-                self.annassign_global(expr)
-
-            elif top_level_expr != '' and top_level_expr is not None:
-
-                print(f'Generating init script {expr}')
-                self.module_init([])
+            expr, type = self.exec(expr, **kwargs)
 
     def assign_global(self, expr: ast.Assign):
-        print('inference is not implemented')
-        name = self.exec(expr.targets[0])
-        value = self.exec(expr.value)
+        type = self.exec(expr.value)
+        return expr, type
 
-        self.header.append(f'extern auto {name};')
-        self.impl.append(f'auto {name} = {value};')
-        return
+    def typecheck(self, a, expected_type):
+        return True
 
     def annassign_global(self, expr: ast.AnnAssign):
-        name = self.exec(expr.target)
-        value = self.exec(expr.value)
-        type = self.exec_type(expr.annotation)
+        value, inferred_type = self.exec(expr.value)
+        type_constraint = self.exec_type(expr.annotation)
 
-        self.header.append(f'extern {type} {name};')
-        self.impl.append(f'{type} {name} = {value};')
-        return
+        if not self.typecheck(inferred_type, type_constraint):
+            print('Typing error')
+
+        # Type annotation is user defined and take precedence on the inferred type
+        # the reason why is that user can add type annotation to pin point exactly where
+        # the mistyping is
+        return expr, type_constraint
 
     def name(self, obj: ast.Name, **kwargs):
-        if self.class_name() != '' and obj.id == 'self':
-            return 'this'
+        type = self.typing_context.get(obj.id, None)
 
-        return obj.id
+        if obj.id in builtintypes:
+            return builtintypes[obj.id], TypeType
+
+        if type is None:
+            print(f'Untyped variable {obj.id}')
+
+        return obj, type
 
     def binop(self, obj: ast.BinOp, **kwargs):
-        rhs = self.exec(obj.right, **kwargs)
-        lhs = self.exec(obj.left, **kwargs)
+        lhs, lhs_type = self.exec(obj.left, **kwargs)
+        # TODO: check if the operator is supported by that type
+        # This is wrong we can expect rhs & lhs to be of a different types
+        # we should fetch the function that match and return its return_type
+        # similar to what is done in ast.Call
+        rhs, rhs_type = self.exec(obj.right, **kwargs)
 
-        n = self._getname(obj.op)
-        op = binop[n]
+        if not self.typecheck(rhs_type, expected_type=lhs_type):
+            print('')
 
-        if op is None:
-            if n == 'pow':
-                return f'pow({lhs}, {rhs})'
-
-        return f'{lhs} {op} {rhs}'
+        return obj, rhs_type
 
     def _return(self, obj: ast.Return, **kwargs):
         _, type = self.exec(obj.value, **kwargs)
         return obj, type
 
     def _import(self, obj: ast.Import, **kwargs):
-        """
-        Examples
-        --------
-
-        import a.c.d as e
-
-        #include "a/b/c.h"
-        using e = a::b::c;
-        """
-        for alias in obj.names:
-            file_name = self.project.module(alias.name)
-            if file_name != '':
-                self.header.append(f'#include {file_name}')
-
-                # this should only be done in cpp files
-                # header should not use namespace shortcut to avoid them bleeding out of the project
-                if alias.asname is not None:
-                    importpath = alias.name.replace('.', '::')
-                    self.header.append(f'using {alias.asname} = {importpath};')
-                    self.typing[alias.asname] = 'module'
-
-        return
-
-    def function_qualifier(self, obj, **kwargs):
-        if self.is_static_method(obj, **kwargs):
-            return 'static '
-
-        # all functions are virtual in python
-        class_name = self.class_name()
-        if class_name and obj.name != '__init__' and self.is_virtual(obj, **kwargs):
-            return 'virtual '
-
-        return ''
+        # This should fetch the imported element so we can type check its usage
+        return obj, None
 
     def attribute(self, obj: ast.Attribute, **kwargs):
         objexpr = self.exec(obj.value, **kwargs)
 
-        if self.init_capture and objexpr == 'this':
+        if self.init_capture and (objexpr == 'this' or objexpr == 'self'):
+            self.typing_context[obj.attr] = None
             return obj.attr
         elif objexpr == 'self':
             return f'this->{obj.attr}'
@@ -318,134 +318,70 @@ class TypeInference:
         return f'{objexpr}{accessor_op}{obj.attr}'
 
     def assign(self, obj: ast.Assign, **kwargs):
-        if self.init_capture:
-            print(f'Type inference not implemented')
-
-            for target in obj.targets:
-                name = self.exec(target, **kwargs)
-                self.header.append(f'T {name};')
-        else:
-            names = []
-            for target in obj.targets:
-                names.append(self.exec(target, **kwargs))
-            expr = self.exec(obj.value, **kwargs)
-
-            if len(names) > 1:
-                names = ', '.join(names)
-
-                decl = ''
-                if self.needs_decl(names):
-                    decl = ';\n'.join(['auto ' + n for n in names]) + ';\n'
-
-                return f'{decl}std::tie({names}) = {expr};'
-
-            type = ''
-            if self.needs_decl(names):
-                type = 'auto '
-            return f'{type}{names[0]} = {expr}'
-
-    def annassign(self, obj: ast.AnnAssign, **kwargs):
-        name = self.exec(obj.target, **kwargs)
-        type = self.exec_type(obj.annotation, **kwargs)
-
-        if self.init_capture:
-            idt = '  '
-            self.header.append(f'{idt}{type} {name};')
-
-        else:
-            expr = self.exec(obj.value, **kwargs)
-            type += ' '
-            if not self.needs_decl([name]):
-                type = ''
-            return f'{type}{name} = {expr}'
-
-    def exec_type(self, expr, **kwargs):
-        v = self.exec(expr, **kwargs)
-
-        if v is None:
-            return 'void'
-
-        if v and v[0] == '"':
-            v = v[1:-1]
-
-        return v
-
-    def functiondef(self, obj: ast.FunctionDef, depth, **kwargs):
         pass
 
-    def function_body(self, obj: ast.FunctionDef, **kwargs):
-        self.body_generation = True
+    def annassign(self, obj: ast.AnnAssign, **kwargs):
+        expected_type = self.exec_type(obj.annotation, **kwargs)
+        expr, expr_type = self.exec(obj.value, **kwargs)
 
+        if not self.typecheck(expr_type, expected_type):
+            print(f'Type mismatch {expected_type} != {expr_type}')
+
+        return obj, expected_type
+
+    def exec_type(self, expr, **kwargs):
+        return self.exec(expr, **kwargs)
+
+    def functiondef(self, obj: ast.FunctionDef, **kwargs):
+        """
+        Examples
+        --------
+        >>> import ast
+        >>> get_type(
+        ... "def add(a: int, b: int) -> int:"
+        ... "   return a + b"
+        ... )
+        typing.Callable[[int, int], int]
+        """
+        return_type, typetype = self.exec_type(obj.returns, **kwargs)
+
+        with self.typing_context as scope:
+            scope.name = obj.name
+
+            offset = 0
+            args = []
+
+            for arg in obj.args.args[offset:]:
+                arg_type = MetaType()
+                if arg.annotation is not None:
+                    arg_type, typetype = self.exec_type(arg.annotation, **kwargs)
+
+                scope[arg.arg] = arg_type
+                args.append(arg_type)
+
+            _, type = self.function_body(obj, **kwargs)
+
+        fun_type = Callable[args, return_type]
+        self.typing_context[obj.name] = fun_type
+        return obj, fun_type
+
+    def function_body(self, obj: ast.FunctionDef, **kwargs):
         body = []
         for b in obj.body:
-            a = self.exec(b, **kwargs)
+            self.exec(b, **kwargs)
 
-            if a != '':
-                body.append(a)
-
-        idt = self.indent()
-        if body:
-            body = idt + f';\n{idt}'.join(body) + ';'
-        else:
-            body = ''
-
-        self.impl.append(body)
-        self.body_generation = False
+        return obj.body, None
 
     def nonetype(self, obj, **kwargs):
         return None, NoneType
 
-    def classdef(self, obj: ast.ClassDef, depth, **kwargs):
+    def classdef(self, obj: ast.ClassDef, **kwargs):
         """To match Python object behaviour all classes are instantiated as shared pointer"""
-        if not self.namespaced:
-            self.push_namespaces()
+        with self.typing_context as scope:
+            scope.name = obj.name
+            scope['self'] = obj
 
-        config = self.class_config(obj)
-
-        name = obj.name
-        with Stack(self.class_stack, name):
-            bases = self.getinheritance(obj, **kwargs)
-            # Forward declaration
-            # self.header.append(f"struct _{name};")
-            # self.header.append(f"using {name} = std::shared_ptr<_{name}>;")
-            self.header.append(f"struct {name}{bases} {{")
-
-            body = []
-            for b in obj.body:
-                body.append(self.exec(b, depth=depth + 1, classconfig=config, **kwargs))
-
-            # self.typing[name] = 'pointer'
-            self.typing[name] = 'value'
-
-            self.header.append("};")
-            # self.header.append(f"""template<class... Args>
-            # |{name} {name.lower()}(Args&&... args){{
-            # |   return std::make_shared<_{name}>(std::forward(args)...);
-            # |}}""".replace('            |', ''))
-
-
-class ProjectConverter:
-    def __init__(self, root, destination):
-        self.project = ProjectFolder(root)
-        self.destination = destination
-
-    def run(self):
-        import os
-        os.makedirs(os.path.join(self.destination, self.project.project_name), exist_ok=True)
-
-        for file in os.listdir(self.project.root):
-            with open(os.path.join(self.project.root, file), 'r') as f:
-                code = f.read()
-
-            module = pyast.parse(code, filename=file)
-            header, impl = CppGenerator(self.project, file).run(module)
-
-            path = os.path.join(self.destination, self.project.project_name)
-            with open(os.path.join(path, file.replace('.py', '.cpp')), 'w') as implfile:
-                implfile.write(impl)
-
-            with open(os.path.join(path, file.replace('.py', '.h')), 'w') as headerfile:
-                headerfile.write(header)
+        return obj, obj
 
 
 if __name__ == '__main__':
