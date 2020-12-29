@@ -5,15 +5,23 @@ import tide.generators.nodes as ast
 from tide.generators.utils import ProjectFolder
 from tide.generators.utils import reserved, builtintypes
 
+
 class KiwiType:
     pass
 
+
 class MetaType:
     def __init__(self):
-        self.clues= []
+        self.clues = []
 
     def add_clue(self, clue):
         self.clues.append(clue)
+
+    def infer(self):
+        if len(self.clues) == 1:
+            return self.clues[0]
+
+        return self.clues[-1]
 
 
 class NoneType(KiwiType):
@@ -246,6 +254,7 @@ class TypeInference:
         """
         Examples
         --------
+        Guess variable's typing from a function call
         >>> import ast
         >>> get_type(
         ...     "def add(a: int, b: int) -> int:\\n"
@@ -318,13 +327,18 @@ class TypeInference:
         rhs, rhs_type = self.exec(obj.right, **kwargs)
 
         if not self.typecheck(rhs_type, expected_type=lhs_type):
-            print('')
+            print('Binary op type mismatch')
 
         return obj, rhs_type
 
     def _return(self, obj: ast.Return, **kwargs):
-        _, type = self.exec(obj.value, **kwargs)
-        return obj, type
+        _, return_type = self.exec(obj.value, **kwargs)
+        meta_type = self.typing_context.get('return')
+
+        if isinstance(meta_type, MetaType):
+            meta_type.add_clue(return_type)
+
+        return obj, return_type
 
     def _import(self, obj: ast.Import, **kwargs):
         # This should fetch the imported element so we can type check its usage
@@ -360,7 +374,7 @@ class TypeInference:
         for target, expected_type in zip(obj.targets, target_types):
             self.exec(target, expected_type=expected_type, **kwargs)
 
-        return None, NoneType
+        return obj, NoneType
 
     def annassign(self, obj: ast.AnnAssign, **kwargs):
         expected_type = self.exec_type(obj.annotation, **kwargs)
@@ -369,7 +383,7 @@ class TypeInference:
         if not self.typecheck(expr_type, expected_type):
             print(f'Type mismatch {expected_type} != {expr_type}')
 
-        return obj, expected_type
+        return obj, NoneType
 
     def exec_type(self, expr, **kwargs):
         return self.exec(expr, **kwargs)
@@ -378,17 +392,31 @@ class TypeInference:
         """
         Examples
         --------
+        All types are available, no inference, returns the function type
         >>> import ast
         >>> get_type(
         ... "def add(a: int, b: int) -> int:\\n"
         ... "   return a + b\\n"
         ... )
         typing.Callable[[int, int], int]
+
+        Return type is missing but can be trivially guessed
+        >>> import ast
+        >>> get_type(
+        ... "def add():\\n"
+        ... "   return 1\\n"
+        ... )
+        typing.Callable[[], int]
         """
         return_type, typetype = self.exec_type(obj.returns, **kwargs)
+        return_type_inference = MetaType()
+        if return_type:
+            return_type_inference.add_clue(return_type)
 
         with self.typing_context as scope:
             scope.name = obj.name
+            scope['return'] = return_type_inference
+            scope['yield'] = return_type_inference
 
             offset = 0
             args = []
@@ -402,6 +430,9 @@ class TypeInference:
                 args.append(arg_type)
 
             _, type = self.function_body(obj, **kwargs)
+
+        return_type = return_type_inference.infer()
+        obj.returns = return_type
 
         fun_type = Callable[args, return_type]
         self.typing_context[obj.name] = fun_type
@@ -420,7 +451,7 @@ class TypeInference:
     def classdef(self, obj: ast.ClassDef, **kwargs):
         """To match Python object behaviour all classes are instantiated as shared pointer"""
         with self.typing_context as scope:
-             = scope
+            self.class_scope = scope
             scope.name = obj.name
             scope['self'] = obj
 
