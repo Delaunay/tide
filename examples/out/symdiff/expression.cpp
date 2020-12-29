@@ -1,4 +1,5 @@
 #include "expression.h"
+auto __author__ = "Pierre Delaunay";
 
 namespace symdiff::expression {
 
@@ -12,7 +13,7 @@ str Expression::__str__ () {
 
 }
 bool Expression::operator == (Expression* other) {
-      if (other == this) {
+      if (this == other) {
       return true;
     };
   return false;
@@ -98,18 +99,18 @@ int Expression::_id () {
   throw None;
 }
 bool Expression::operator < (Expression* other) {
-  return other._id() < this->_id();
+  return this->_id() < other._id();
 }
 Tuple reorder (Expression* a, Expression* b) {
   auto ia = a._id();
   auto ib = b._id();
-    if (ib < ia) {
+    if (ia < ib) {
     return std::make_tuple(a, b);
   };
-    if (ib != ia) {
+    if (ia != ib) {
     return std::make_tuple(b, a);
   };
-    if (a.is_scalar() && b.is_scalar() && b.value > a.value) {
+    if (a.is_scalar() && b.is_scalar() && a.value > b.value) {
     return std::make_tuple(b, a);
   };
   return std::make_tuple(a, b);
@@ -119,11 +120,11 @@ UnaryOperator::UnaryOperator (Expression* expr) {
   this->expr = expr;
 }
 bool UnaryOperator::operator == (Expression* other) {
-      if (other == this) {
+      if (this == other) {
       return true;
     };
       if (isinstance(other, type(this))) {
-            if (other.expr == this->expr) {
+            if (this->expr == other.expr) {
         return true;
       };
     };
@@ -141,11 +142,11 @@ BinaryOperator::BinaryOperator (Expression* left, Expression* right) {
   this->right = right;
 }
 bool BinaryOperator::operator == (Expression* other) {
-      if (other == this) {
+      if (this == other) {
       return true;
     };
       if (isinstance(other, type(this))) {
-            if (other.left == this->left && other.right == this->right) {
+            if (this->left == other.left && this->right == other.right) {
         return true;
       };
     };
@@ -171,10 +172,10 @@ Expression* ScalarReal::__neg__ () {
   return scalar(- this->value);
 }
 bool ScalarReal::operator == (Expression* other) {
-      if (other == this) {
+      if (this == other) {
       return true;
     };
-      if (isinstance(other, ScalarReal) && this->value == other.value) {
+      if (isinstance(other, ScalarReal) && other.value == this->value) {
       return true;
     };
   return false;
@@ -183,10 +184,10 @@ bool ScalarReal::is_scalar () {
   return true;
 }
 bool ScalarReal::is_one () {
-  return 1 == this->value;
+  return this->value == 1;
 }
 bool ScalarReal::is_nul () {
-  return 0 == this->value;
+  return this->value == 0;
 }
 bool ScalarReal::is_leaf () {
   return true;
@@ -212,6 +213,10 @@ Expression* ScalarReal::apply_function (str function) {
 int ScalarReal::_id () {
   return 0;
 }
+Expression* __one = ScalarReal(1);
+Expression* __zero = ScalarReal(0);
+Expression* __minus_one = ScalarReal(- 1);
+Expression* __two = ScalarReal(2);
 Expression* one () {
   return __one;
 }
@@ -245,7 +250,7 @@ bool Unknown::is_leaf () {
   return true;
 }
 Expression* Unknown::derivate (Expression* x) {
-      if (this == x) {
+      if (x == this) {
       return one();
     };
   return zero();
@@ -513,6 +518,8 @@ void MathConstant::copy () {
 int MathConstant::_id () {
   return 9;
 }
+auto __euler = MathConstant("e", 2.718281828459045);
+auto __pi = MathConstant("pi", 3.141592653589793);
 Expression* pi () {
   return __pi;
 }
@@ -527,32 +534,32 @@ Expression* add (Expression* l, Expression* r) {
     if (r.is_scalar() && l.is_scalar()) {
     return scalar(r.value + l.value);
   };
-    if (r == l) {
+    if (l == r) {
     return mult(l, scalar(2));
   };
     if (isinstance(l, Subtraction)) {
-        if (r == l.right) {
+        if (l.right == r) {
       return l.left;
     };
   };
     if (isinstance(r, Subtraction)) {
-        if (l == r.right) {
+        if (r.right == l) {
       return r.left;
     };
   };
     if (isinstance(l, Multiplication)) {
-        if (r == l.right && l.left.is_scalar()) {
+        if (l.right == r && l.left.is_scalar()) {
       return mult(r, scalar(l.left.value + 1));
     };
-        if (r == l.left && l.right.is_scalar()) {
+        if (l.left == r && l.right.is_scalar()) {
       return mult(r, scalar(l.right.value + 1));
     };
   };
     if (isinstance(r, Multiplication)) {
-        if (l == r.right && r.left.is_scalar()) {
+        if (r.right == l && r.left.is_scalar()) {
       return mult(l, scalar(r.left.value + 1));
     };
-        if (l == r.left && r.right.is_scalar()) {
+        if (r.left == l && r.right.is_scalar()) {
       return mult(l, scalar(r.right.value + 1));
     };
   };
@@ -572,7 +579,7 @@ Expression* mult (Expression* l, Expression* r) {
     if (l.is_scalar() && r.is_scalar()) {
     return scalar(l.value * r.value);
   };
-    if (r == l) {
+    if (l == r) {
     return pow(l, scalar(2));
   };
     if (l.is_scalar() && isinstance(r, Multiplication)) {
@@ -581,22 +588,22 @@ Expression* mult (Expression* l, Expression* r) {
     };
   };
     if (isinstance(l, Divide)) {
-        if (r == l.down()) {
+        if (l.down() == r) {
       return l.up();
     };
   };
     if (isinstance(r, Divide)) {
-        if (l == r.down()) {
+        if (r.down() == l) {
       return r.up();
     };
   };
     if (isinstance(l, Pow)) {
-        if (r == l.left && l.right.is_scalar()) {
+        if (l.left == r && l.right.is_scalar()) {
       return pow(r, scalar(l.right.value + 1));
     };
   };
     if (isinstance(r, Pow)) {
-        if (l == r.left && r.right.is_scalar()) {
+        if (r.left == l && r.right.is_scalar()) {
       return pow(l, scalar(r.right.value + 1));
     };
   };
@@ -633,7 +640,7 @@ Expression* log (Expression* expr) {
     if (expr.is_one()) {
     return zero();
   };
-    if (e() == expr) {
+    if (expr == e()) {
     return one();
   };
     if (isinstance(expr, Exp)) {
@@ -645,7 +652,7 @@ Expression* div (Expression* up, Expression* down) {
     if (down.is_one()) {
     return up;
   };
-    if (down == up) {
+    if (up == down) {
     return one();
   };
     if (up.is_nul()) {
@@ -654,7 +661,7 @@ Expression* div (Expression* up, Expression* down) {
     if (up.is_scalar() && down.is_scalar()) {
     auto rv = down.value;
     auto lv = up.value;
-        if (0 == rv - int(rv) && 0 == lv - int(lv)) {
+        if (rv - int(rv) == 0 && lv - int(lv) == 0) {
       auto gcd = math.gcd(int(rv), int(lv));
       rv /= gcd;
       lv /= gcd;
@@ -665,40 +672,40 @@ Expression* div (Expression* up, Expression* down) {
     };
   };
     if (isinstance(up, Multiplication)) {
-        if (down == up.left) {
+        if (up.left == down) {
       return up.right;
     };
-        if (down == up.right) {
+        if (up.right == down) {
       return up.left;
     };
   };
     if (isinstance(down, Multiplication)) {
-        if (up == down.left) {
+        if (down.left == up) {
       return down.right;
     };
-        if (up == down.right) {
+        if (down.right == up) {
       return down.left;
     };
   };
   return Divide(up, down);
 }
 Expression* scalar (float v) {
-    if (0 == v) {
+    if (v == 0) {
     return zero();
   };
-    if (1 == v) {
+    if (v == 1) {
     return one();
   };
-    if (- 1 == v) {
+    if (v == - 1) {
     return minus_one();
   };
-    if (2 == v) {
+    if (v == 2) {
     return two();
   };
   return ScalarReal(v);
 }
 Expression* sub (Expression* l, Expression* r) {
-    if (r == l) {
+    if (l == r) {
     return zero();
   };
     if (l.is_nul()) {
@@ -711,14 +718,27 @@ Expression* sub (Expression* l, Expression* r) {
     return scalar(l.value - r.value);
   };
     if (isinstance(l, Addition)) {
-        if (l.right == r) {
+        if (r == l.right) {
       return l.left;
     };
-        if (l.left == r) {
+        if (r == l.left) {
       return l.right;
     };
   };
   return Subtraction(l, r);
+}
+int __main__(int argc, const char* argv[]) {
+  auto x = Unknown("x");
+  auto y = Unknown("y");
+  auto val = std::make_dict{{ x, scalar(5) }};
+  auto f = pow(x, 3) - pow(y, 2);
+  auto dfdx = f.derivate(x);
+  print(" f   : ", f, "	Eval: ", f.eval(val));
+  print("dfdx : ", dfdx, "	Eval: ", dfdx.eval(val));
+  auto val = std::make_dict{{ x, scalar(5) }, { y, scalar(2) }};
+  print(" f   : ", f, "	Eval: ", f.full_eval(val));
+  print("dfdx : ", dfdx, "	Eval: ", dfdx.full_eval(val));
+  return 0;
 }
 
 } // symdiff::expression

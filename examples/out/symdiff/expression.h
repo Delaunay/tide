@@ -2,6 +2,7 @@
 #define SYMDIFF_EXPRESSION_HEADER
 
 #include "kiwi"
+extern auto __author__;
 #include <cmath>
 
 namespace symdiff::expression {
@@ -73,6 +74,10 @@ struct ScalarReal: public Expression {
   virtual Expression* apply_function (str function);
   virtual int _id ();
 };
+extern Expression* __one;
+extern Expression* __zero;
+extern Expression* __minus_one;
+extern Expression* __two;
 Expression* one ();
 Expression* zero ();
 Expression* minus_one ();
@@ -187,6 +192,8 @@ struct MathConstant: public ScalarReal {
   virtual void copy ();
   virtual int _id ();
 };
+extern auto __euler;
+extern auto __pi;
 Expression* pi ();
 Expression* e ();
 Expression* add (Expression* l, Expression* r);
@@ -197,6 +204,7 @@ Expression* log (Expression* expr);
 Expression* div (Expression* up, Expression* down);
 Expression* scalar (float v);
 Expression* sub (Expression* l, Expression* r);
+int __main__(int argc, const char* argv[]);
 
 } // symdiff::expression
 #endif

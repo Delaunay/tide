@@ -1,4 +1,5 @@
 #include "solve.h"
+auto __author__ = "Pierre Delaunay";
 
 namespace symdiff::solve {
 
@@ -39,5 +40,10 @@ Expression solve (Expression function, int value, bool show_steps) {
   };
   return s;
 }
+auto x = Unknown("x");
+auto y = Unknown("y");
+auto f1 = x * x * x + y;
+auto sol = solve(f1, 10);
+auto f2 = x + y;
 
 } // symdiff::solve

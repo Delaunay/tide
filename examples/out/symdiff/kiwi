@@ -12,7 +12,7 @@ class has_repr
     typedef char one;
     struct two { char x[2]; };
 
-    template <typename C> static one test( decltype(&C::repr) ) ;
+    template <typename C> static one test( decltype(&C::__repr__) ) ;
     template <typename C> static two test(...);
 
 public:
@@ -45,6 +45,11 @@ str repr(T const& obj) {
     return _Rep<T, has_repr<T>::value>::repr(T);
 }
 
-
+//
+template<typename T, int uid = 0>
+T& global() {
+    static T global;
+    return global;
+}
 
 #endif

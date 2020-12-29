@@ -227,10 +227,10 @@ class ScalarReal(Expression):
         return 0
 
 # pre allocate common values
-__one = ScalarReal(1)
-__zero = ScalarReal(0)
-__minus_one = ScalarReal(-1)
-__two = ScalarReal(2)
+__one: 'Expression*' = ScalarReal(1)
+__zero: 'Expression*' = ScalarReal(0)
+__minus_one: 'Expression*' = ScalarReal(-1)
+__two: 'Expression*' = ScalarReal(2)
 
 
 def one() -> 'Expression*':

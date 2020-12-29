@@ -2,6 +2,7 @@
 #define CONTAINERS_POINT_HEADER
 
 #include "kiwi"
+#include "tide/runtime/kiwi.h"
 #include "myproject/math.h"
 using math = myproject::math;
 
@@ -21,10 +22,16 @@ struct Point {
   Point (float x, float y);
   float sum ();
   ~Point ();
-  bool operator == (Point const& other);
+  bool operator == (Point const& other) const;
+  Point operator - (Point const& other) const;
+  Point operator + (Point const& other) const;
+  Point operator * (Point const& other) const;
+  float dot (Point const& other);
   void other ();
-  static float dist (Point a, Point b);
+  float dist ();
+  static float distance (Point const& a, Point const& b);
 };
+extern Point zero;
 int __main__(int argc, const char* argv[]);
 
 } // containers::point

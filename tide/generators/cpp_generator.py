@@ -1,114 +1,8 @@
-import tide.generators.nodes as ast
 import ast as pyast
 
-reserved = {
-    'return',
-    'import',
-    'pass',
-    'if',
-    'raise',
-    'while'
-}
-
-unaryoperators = {
-    'usub': '-'
-}
-
-binop = dict(
-    add='+',
-    sub='-',
-    mult='*',
-    div='/',
-    pow=None
-)
-
-compop = {
-    'is': '==',
-    'lt': '<',
-    'gt': '>',
-    'lte': '<=',
-    'gte': '>=',
-    'noteq': '!=',
-    'eq': '==',
-    'in': None
-}
-
-operators = {
-    'is': '==',
-    'lt': '<',
-    'gt': '>',
-    'lte': '<=',
-    'gte': '>=',
-    'noteq': '!=',
-    'eq': '==',
-    'mul': '*',
-    'add': '+',
-    'sub': '-',
-    'pow': None,
-}
-
-booloperator = {
-    'and': '&&',
-    'or': '||',
-}
-
-libreplace = {
-    'math': ('cmath', 'system'),
-    'typing': ('', 'ignore'),
-}
-
-
-class ProjectFolder:
-    """Class helper used to resolve project files"""
-    def __init__(self, root):
-        self.project_name = root.split('/')[-1]
-        self.root = root
-        self.prefix = self.root[:-len(self.project_name)]
-
-    def namespaces(self, filename):
-        """Transform a filename into a namespace"""
-        if filename.startswith(self.prefix):
-            return filename[len(self.prefix):].replace('.py', '').split('/'), True
-
-        return [self.project_name] + filename.replace('.py', '').split('/'), True
-
-    def module(self, module_path, level=0):
-        print(f'Looking up {module_path}')
-        libname, libspace = libreplace.get(module_path, (None, None))
-
-        if libname is None:
-            name = module_path.replace('.', '/') + '.h'
-            return f'"{name}"'
-
-        if libname == '' and libspace == 'ignore':
-            return ''
-
-        if libspace == 'system':
-            return f'<{libname}>'
-
-        return f'"{libname}"'
-
-    def header_guard(self, filename):
-        if not filename.startswith(self.root):
-            return (self.project_name + '_' +
-                    filename.replace('/', '_').replace('.py', '')
-                    + '_HEADER').upper()
-
-        name = filename[len(self.prefix):]
-        return name.replace('.py', '').replace('/', '_').upper() + '_HEADER'
-
-
-class Stack:
-    def __init__(self, s, name):
-        self.s = s
-        self.name = name
-
-    def __enter__(self):
-        self.s.append(self.name)
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        r = self.s.pop()
-        assert r == self.name, 'Nested'
+import tide.generators.nodes as ast
+from tide.generators.utils import ProjectFolder, Stack
+from tide.generators.utils import reserved, compop, binop, unaryoperators, booloperator, operators
 
 
 class CppGenerator:
@@ -133,6 +27,20 @@ class CppGenerator:
 
         if ok:
             self.namespaces = '::'.join(namespace)
+
+    def diagnostic(self, obj, *args, **kwargs):
+        diagnostic = ''
+        if hasattr(obj, 'lineno'):
+            diagnostic = f':L{obj.lineno} C{obj.col_offset}'
+
+        class_name = self.class_name()
+        function = self.function_name()
+
+        entity = ''
+        if class_name or function:
+            entity = f' {class_name}::{function}'
+
+        print(f'{self.project.project_name}/{self.filename}{diagnostic}{entity}', *args, **kwargs)
 
     def tuple(self, obj: ast.Tuple, **kwargs):
         elements = []
@@ -325,13 +233,7 @@ class CppGenerator:
             fun = getattr(self, self._getname(obj))
             return fun(obj, **kwargs)
         except Exception as e:
-            print(f'Error when processing {obj}')
-
-            for c in self.class_stack:
-                print('class', c)
-
-            for f in self.function_stack:
-                print('function', f)
+            self.diagnostic(obj, f'Error when processing {obj}')
             raise e
 
     def _while(self, obj: ast.While, depth, **kwargs):
@@ -383,13 +285,39 @@ class CppGenerator:
 
             # Make a new entry-point
             if isinstance(expr, pyast.If) and main_guard(expr):
-                if expr.orelse is not None:
+                if len(expr.orelse) > 0:
                     print('Warning ignoring the else when generating a new entry point')
 
                 self.entry_point(expr.body)
+
+            elif isinstance(expr, pyast.Assign):
+                self.assign_global(expr)
+
+            elif isinstance(expr, pyast.AnnAssign):
+                self.annassign_global(expr)
+
             elif top_level_expr != '' and top_level_expr is not None:
-                print('Generating init script')
-                self.module_init([])
+                pass
+                # print(f'Generating init script {expr}')
+                # self.module_init([])
+
+    def assign_global(self, expr: ast.Assign):
+        self.diagnostic(expr, 'inference is not implemented')
+        name = self.exec(expr.targets[0])
+        value = self.exec(expr.value)
+
+        self.header.append(f'extern auto {name};')
+        self.impl.append(f'auto {name} = {value};')
+        return
+
+    def annassign_global(self, expr: ast.AnnAssign):
+        name = self.exec(expr.target)
+        value = self.exec(expr.value)
+        type = self.exec_type(expr.annotation)
+
+        self.header.append(f'extern {type} {name};')
+        self.impl.append(f'{type} {name} = {value};')
+        return
 
     def module_init(self, expr_body):
         if not self.namespaced:
@@ -508,6 +436,13 @@ class CppGenerator:
 
         return False
 
+    def is_const_method(self, obj: ast.FunctionDef, **kwargs):
+        for decorator in obj.decorator_list:
+            if isinstance(decorator, pyast.Name) and decorator.id == 'const':
+                return True
+
+        return False
+
     def is_virtual(self, obj: ast.FunctionDef, **kwargs):
         classconfig = kwargs.get('classconfig', dict())
 
@@ -588,7 +523,7 @@ class CppGenerator:
 
     def assign(self, obj: ast.Assign, **kwargs):
         if self.init_capture:
-            print(f'Type inference not implemented')
+            self.diagnostic(obj, 'Type inference not implemented')
 
             for target in obj.targets:
                 name = self.exec(target, **kwargs)
@@ -653,7 +588,7 @@ class CppGenerator:
 
         return v
 
-    def magic_functions(self, obj, name, returntype, args, **kwargs):
+    def magic_functions(self, obj: ast.FunctionDef, name, returntype, args, **kwargs):
         # Magic functions
         proto_header = f'{returntype} {name} ({args})'
         proto_impl = f'{returntype} {name} ({args})'
@@ -661,6 +596,10 @@ class CppGenerator:
         class_name = self.class_name()
         if class_name:
             proto_impl = f'{returntype} {class_name}::{name} ({args})'
+
+            const_qualifier = ''
+            if self.is_const_method(obj):
+                const_qualifier = ' const'
 
             if name == '__init__':
                 self.capture_members(obj, **kwargs)
@@ -673,16 +612,17 @@ class CppGenerator:
 
             elif name in ('__str__', '__repr__'):
                 pass
+
             elif name.startswith('__') and name.endswith('__') and len(name) > 4:
                 py_op = name[2:-2]
                 cpp_op = operators.get(py_op)
 
                 if cpp_op is None:
-                    print(f'No CPP operator matching for {py_op}')
+                    self.diagnostic(obj, f'No CPP operator matching for {py_op}')
 
                 elif name:
-                    proto_header = f'{returntype} operator {cpp_op} ({args})'
-                    proto_impl = f'{returntype} {class_name}::operator {cpp_op} ({args})'
+                    proto_header = f'{returntype} operator {cpp_op} ({args}){const_qualifier}'
+                    proto_impl = f'{returntype} {class_name}::operator {cpp_op} ({args}){const_qualifier}'
 
         return proto_header, proto_impl
 
@@ -701,8 +641,7 @@ class CppGenerator:
                 type = self.exec_type(arg.annotation, depth=depth, **kwargs)
 
                 if type is None:
-                    print(f'{self.class_name()}::{self.function_name()} '
-                          f'type inference is not implemented for argument `{arg.arg}`')
+                    self.diagnostic(obj, f'type inference is not implemented for argument `{arg.arg}`')
                     type = 'T'
 
                 args.append(f'{type} {arg.arg}')
@@ -814,10 +753,10 @@ class ProjectConverter:
 
 
 if __name__ == '__main__':
-    # converter = ProjectConverter(
-    #     'C:/Users/Newton/work/tide/examples/symdiff',
-    #     'C:/Users/Newton/work/tide/examples/out')
-    # converter.run()
+    converter = ProjectConverter(
+        'C:/Users/Newton/work/tide/examples/symdiff',
+        'C:/Users/Newton/work/tide/examples/out')
+    converter.run()
 
     converter = ProjectConverter(
         'C:/Users/Newton/work/tide/examples/containers',
