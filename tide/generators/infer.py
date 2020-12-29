@@ -92,7 +92,9 @@ class TypeInference:
         self.project = project
         self.filename = filename
         self.typing_context = TypingContext(self)
-        self.class_scope = None
+        self.class_scopes = []
+        self.function_scopes = []
+        self.scopes = dict()
 
     @staticmethod
     def _getname(obj):
@@ -132,8 +134,9 @@ class TypeInference:
 
     def infer_container(self, obj, **kwargs):
         types = []
+        element_type = None
         for e in obj.elts:
-            _, element_type = self.exec(e, **kwargs)
+            _, element_type = self.exec(e, expected_type=element_type, **kwargs)
             types.append(element_type)
 
         first = types[0]
@@ -180,9 +183,11 @@ class TypeInference:
         typing.Dict[str, int]
         """
         types = []
+        key_type = None
+        value_type = None
         for k, v in zip(obj.keys, obj.values):
-            _, key_type = self.exec(k, **kwargs)
-            _, value_type = self.exec(v, **kwargs)
+            _, key_type = self.exec(k, expected_type=key_type, **kwargs)
+            _, value_type = self.exec(v, expected_type=value_type, **kwargs)
             types.append((key_type, value_type))
 
         first = types[0]
@@ -196,16 +201,31 @@ class TypeInference:
         return obj, Dict[first[0], first[1]]
 
     def augassign(self, obj: ast.AugAssign, **kwargs):
-        # might not need to infer this because an assign needed to be there before
-        # value, _ = self.exec(obj.value, **kwargs)
-        _, type = self.exec(obj.target, **kwargs)
-        return obj, type
+        # the variable we are setting should be already defined
+        _, target_type = self.exec(obj.target, **kwargs)
+        _, value_type = self.exec(obj.value, expected_type=target_type, **kwargs)
+
+        if not self.typecheck(value_type, target_type):
+            print(f'type mismatch {value_type} != {target_type}')
+
+        # target_type takes precedence here because that type comes
+        # from the variable definition
+        return obj, target_type
 
     def _if(self, obj: ast.If, **kwargs):
+        self.exec(obj.test)
+
+        for b in obj.body:
+            self.exec(b, **kwargs)
+
+        for b in obj.orelse:
+            self.exec(b, **kwargs)
+
         return obj, None
 
     def unaryop(self, obj: ast.UnaryOp, **kwargs):
         _, type = self.exec(obj.operand, **kwargs)
+        # TODO check that the unary op is supported by that type
         return obj, type
 
     def expr(self, obj: ast.Expr, **kwargs):
@@ -225,11 +245,33 @@ class TypeInference:
         self.exec(module, depth=0)
 
     def boolop(self, obj: ast.BoolOp, **kwargs):
+        for b in obj.values:
+            self.exec(b, **kwargs)
         return obj, bool
 
     def subscript(self, obj: ast.Subscript, **kwargs):
-        _, type = self.exec(obj.value, **kwargs)
-        return obj, type
+        """
+        Examples
+        --------
+        Guess variable's typing from a function call
+        >>> import ast
+        >>> get_type(
+        ...     "a = [1, 2, 3]\\n"
+        ...     "b = a[1]\\n",
+        ...     name='b'
+        ... )
+        <class 'int'>
+        """
+
+        # <value>[<slice>]
+        _, object_type = self.exec(obj.value, **kwargs)
+        element_type = object_type
+
+        # TODO: hack for now
+        if hasattr(object_type, '__args__') and isinstance(obj.slice, pyast.Index):
+            element_type = object_type.__args__[0]
+
+        return obj, element_type
 
     def importfrom(self, obj: ast.ImportFrom, **kwargs):
         return obj, None
@@ -243,8 +285,14 @@ class TypeInference:
             raise e
 
     def _while(self, obj: ast.While, **kwargs):
+        self.exec(obj.test)
+
         for b in obj.body:
             self.exec(b, **kwargs)
+
+        for b in obj.orelse:
+            self.exec(b, **kwargs)
+
         return obj, None
 
     def _pass(self, obj: ast.Pass, **kwargs):
@@ -358,8 +406,8 @@ class TypeInference:
         if expected_type is None:
             print(f'Missing attribute type {obj}')
 
-        if self.class_scope:
-            self.class_scope[obj.attr] = expected_type
+        if self.class_scopes:
+            self.class_scopes[-1][obj.attr] = expected_type
             return obj, expected_type
 
         return obj, expected_type
@@ -368,7 +416,7 @@ class TypeInference:
         _, target_type = self.exec(obj.value, **kwargs)
 
         target_types = [target_type]
-        if hasattr(target_type, '__args__'):
+        if len(obj.targets) > 1and hasattr(target_type, '__args__'):
             target_types = target_type.__args__
 
         for target, expected_type in zip(obj.targets, target_types):
@@ -415,6 +463,8 @@ class TypeInference:
 
         with self.typing_context as scope:
             scope.name = obj.name
+            self.scopes[obj] = scope
+            self.function_scopes.append(scope)
             scope['return'] = return_type_inference
             scope['yield'] = return_type_inference
 
@@ -436,6 +486,7 @@ class TypeInference:
 
         fun_type = Callable[args, return_type]
         self.typing_context[obj.name] = fun_type
+        self.function_scopes.pop()
         return obj, fun_type
 
     def function_body(self, obj: ast.FunctionDef, **kwargs):
@@ -449,12 +500,13 @@ class TypeInference:
         return None, NoneType
 
     def classdef(self, obj: ast.ClassDef, **kwargs):
-        """To match Python object behaviour all classes are instantiated as shared pointer"""
         with self.typing_context as scope:
-            self.class_scope = scope
+            self.class_scopes.append(scope)
+            self.scopes[obj] = scope
             scope.name = obj.name
             scope['self'] = obj
 
+        self.class_scopes.pop()
         return obj, obj
 
 

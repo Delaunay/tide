@@ -700,7 +700,6 @@ class CppGenerator:
         pass
 
     def classdef(self, obj: ast.ClassDef, depth, **kwargs):
-        """To match Python object behaviour all classes are instantiated as shared pointer"""
         if not self.namespaced:
             self.push_namespaces()
 
