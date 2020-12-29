@@ -34,12 +34,19 @@ class UnionType(KiwiType):
         self.types = types
 
 
-def get_type(code):
+def get_type(code, name=None):
     import ast
     module = ast.parse(code)
     inferrer = TypeInference(ProjectFolder('.'), '')
-    _, type = inferrer.exec(module.body[0])
-    return type
+
+    expr_type = None
+    for b in module.body:
+        _, expr_type = inferrer.exec(b)
+
+    if name is None:
+        return expr_type
+
+    return inferrer.typing_context.get(name)
 
 
 class TypingContext:
@@ -77,6 +84,7 @@ class TypeInference:
         self.project = project
         self.filename = filename
         self.typing_context = TypingContext(self)
+        self.class_scope = None
 
     @staticmethod
     def _getname(obj):
@@ -235,6 +243,19 @@ class TypeInference:
         return obj, None
 
     def call(self, obj: ast.Call, **kwargs):
+        """
+        Examples
+        --------
+        >>> import ast
+        >>> get_type(
+        ...     "def add(a: int, b: int) -> int:\\n"
+        ...     "   return a + b\\n"
+        ...     "\\n"
+        ...     "a = add(1, 2)\\n",
+        ...     name='a'
+        ... )
+        <class 'int'>
+        """
         fun, callable_type = self.exec(obj.func, **kwargs)
         arg_types = callable_type.__args__[:-1]
         return_type = callable_type.__args__[-1]
@@ -273,13 +294,17 @@ class TypeInference:
         # the mistyping is
         return expr, type_constraint
 
-    def name(self, obj: ast.Name, **kwargs):
+    def name(self, obj: ast.Name, expected_type=None, **kwargs):
         type = self.typing_context.get(obj.id, None)
+
+        if type is None and expected_type is not None:
+            type = expected_type
+            self.typing_context[obj.id] = expected_type
 
         if obj.id in builtintypes:
             return builtintypes[obj.id], TypeType
 
-        if type is None:
+        if type is None and expected_type is None:
             print(f'Untyped variable {obj.id}')
 
         return obj, type
@@ -305,20 +330,37 @@ class TypeInference:
         # This should fetch the imported element so we can type check its usage
         return obj, None
 
-    def attribute(self, obj: ast.Attribute, **kwargs):
-        objexpr = self.exec(obj.value, **kwargs)
+    def attribute(self, obj: ast.Attribute, expected_type=None, **kwargs):
+        attr_type = self.typing_context.get(obj.attr)
 
-        if self.init_capture and (objexpr == 'this' or objexpr == 'self'):
-            self.typing_context[obj.attr] = None
-            return obj.attr
-        elif objexpr == 'self':
-            return f'this->{obj.attr}'
+        if expected_type and attr_type:
+            # attr_type here is the expected type
+            # expected_type is coming from the assign expression
+            self.typecheck(expected_type, attr_type)
 
-        accessor_op = self.attribute_accessor(objexpr)
-        return f'{objexpr}{accessor_op}{obj.attr}'
+        if expected_type is None:
+            expected_type = attr_type
+
+        if expected_type is None:
+            print(f'Missing attribute type {obj}')
+
+        if self.class_scope:
+            self.class_scope[obj.attr] = expected_type
+            return obj, expected_type
+
+        return obj, expected_type
 
     def assign(self, obj: ast.Assign, **kwargs):
-        pass
+        _, target_type = self.exec(obj.value, **kwargs)
+
+        target_types = [target_type]
+        if hasattr(target_type, '__args__'):
+            target_types = target_type.__args__
+
+        for target, expected_type in zip(obj.targets, target_types):
+            self.exec(target, expected_type=expected_type, **kwargs)
+
+        return None, NoneType
 
     def annassign(self, obj: ast.AnnAssign, **kwargs):
         expected_type = self.exec_type(obj.annotation, **kwargs)
@@ -338,8 +380,8 @@ class TypeInference:
         --------
         >>> import ast
         >>> get_type(
-        ... "def add(a: int, b: int) -> int:"
-        ... "   return a + b"
+        ... "def add(a: int, b: int) -> int:\\n"
+        ... "   return a + b\\n"
         ... )
         typing.Callable[[int, int], int]
         """
@@ -378,6 +420,7 @@ class TypeInference:
     def classdef(self, obj: ast.ClassDef, **kwargs):
         """To match Python object behaviour all classes are instantiated as shared pointer"""
         with self.typing_context as scope:
+             = scope
             scope.name = obj.name
             scope['self'] = obj
 
