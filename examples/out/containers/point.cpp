@@ -15,6 +15,9 @@ float Point::sum () {
 Point::~Point () {
   return ;
 }
+Tuple<float, float> Point::astuple () {
+  return std::make_tuple(this->x, this->y);
+}
 bool Point::operator == (Point const& other) const {
   return this->x == other.x && this->y == other.y;
 }

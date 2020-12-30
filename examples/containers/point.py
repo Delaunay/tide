@@ -21,6 +21,9 @@ class Point:
     def __del__(self):
         return
 
+    def astuple(self) -> Tuple[float, float]:
+        return self.x, self.y
+
     @const
     def __eq__(self, other: 'Point const&') -> bool:
         return self.x == other.x and self.y == other.y

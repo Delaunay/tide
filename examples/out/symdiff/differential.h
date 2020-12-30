@@ -1,0 +1,5 @@
+#ifndef SYMDIFF_DIFFERENTIAL_HEADER
+#define SYMDIFF_DIFFERENTIAL_HEADER
+
+#include "kiwi"
+#endif

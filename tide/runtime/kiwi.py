@@ -9,6 +9,10 @@ def const(*args, **kwargs):
     pass
 
 
+def abstract(*args, **kwargs):
+    pass
+
+
 def virtual(*args, **kwargs):
     pass
 

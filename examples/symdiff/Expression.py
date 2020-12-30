@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 __author__ = 'Pierre Delaunay'
-from tide.runtime.kiwi import Dict, Tuple
+from tide.runtime.kiwi import *
 
 import math
 
@@ -9,6 +9,10 @@ class Expression:
 
     def __init__(self):
         pass
+
+    @abstract
+    def visit(self):
+        raise NotImplemented
 
     def __repr__(self) -> str:
         return 'FAIL'

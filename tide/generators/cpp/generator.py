@@ -2,7 +2,7 @@ import ast as pyast
 
 import tide.generators.nodes as ast
 from tide.generators.utils import ProjectFolder, Stack
-from tide.generators.utils import reserved, compop, binop, unaryoperators, booloperator, operators
+from tide.generators.utils import typing_types, reserved, compop, binop, unaryoperators, booloperator, operators
 
 
 class CppGenerator:
@@ -45,7 +45,7 @@ class CppGenerator:
         if class_name or function:
             entity = f' {class_name}::{function}'
 
-        print(f'{self.project.project_name}/{self.filename}{diagnostic}{entity} -', *args, **kwargs)
+        print(f'[GEN] {self.project.project_name}/{self.filename}{diagnostic}{entity} -', *args, **kwargs)
 
     def tuple(self, obj: ast.Tuple, **kwargs):
         elements = []
@@ -219,6 +219,12 @@ class CppGenerator:
         return f' {op} '.join(values)
 
     def subscript(self, obj: ast.Subscript, **kwargs):
+        if isinstance(obj.value, pyast.Name) and obj.value.id in typing_types:
+            types = [self.exec(e, **kwargs) for e in obj.slice.value.elts]
+            types = ', '.join(types)
+
+            return f'{obj.value.id}<{types}>'
+
         return self.exec(obj.value, **kwargs)
 
     def set(self, obj: ast.Set, **kwargs):

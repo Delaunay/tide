@@ -3,7 +3,7 @@ from typing import *
 
 import tide.generators.nodes as ast
 from tide.generators.utils import ProjectFolder
-from tide.generators.utils import reserved, builtintypes
+from tide.generators.utils import reserved, builtintypes, typing_types
 
 
 class KiwiType:
@@ -49,7 +49,10 @@ def get_type(code, name=None):
 
     expr_type = None
     for b in module.body:
-        _, expr_type = inferer.exec(b)
+        expr, expr_type = inferer.exec(b)
+
+        if expr_type is TypeType:
+            expr_type = expr
 
     if name is None:
         return expr_type
@@ -97,6 +100,30 @@ class TypeInference:
         # Hold the typing information for all expressions inside a module
         self.scopes = dict(root=self.typing_context)
 
+    def class_name(self):
+        if self.class_scopes:
+            return self.class_scopes[-1].name
+        return ''
+
+    def function_name(self):
+        if self.function_scopes:
+            return self.function_scopes[-1].name
+        return ''
+
+    def diagnostic(self, obj, *args, **kwargs):
+        diagnostic = ''
+        if hasattr(obj, 'lineno'):
+            diagnostic = f':L{obj.lineno} C{obj.col_offset}'
+
+        class_name = self.class_name()
+        function = self.function_name()
+
+        entity = ''
+        if class_name or function:
+            entity = f' {class_name}::{function}'
+
+        print(f'[INFER] {self.project.project_name}/{self.filename}{diagnostic}{entity} -', *args, **kwargs)
+
     @staticmethod
     def _getname(obj):
         name = type(obj).__name__.lower()
@@ -143,7 +170,7 @@ class TypeInference:
         first = types[0]
         for element_type in types:
             if isinstance(element_type, first):
-                print(f'warning type mismatch {element_type} != {first}')
+                self.diagnostic(obj, f'type mismatch {element_type} != {first}')
 
         return obj, first
 
@@ -209,14 +236,14 @@ class TypeInference:
 
         for kt, vt in types:
             if isinstance(kt, first[0]):
-                print(f'warning type mismatch {kt} != {first[0]}')
+                self.diagnostic(obj, f'type mismatch {kt} != {first[0]}')
 
             if isinstance(vt, first[1]):
-                print(f'warning type mismatch {vt} != {first[0]}')
+                self.diagnostic(obj, f'type mismatch {vt} != {first[0]}')
 
         dict_type = Dict[first[0], first[1]]
-        if expected_type is not None and not self.typecheck(dict_type, expected_type):
-            print('type mismatch')
+        if expected_type is not None and not self.typecheck(obj, dict_type, expected_type):
+            pass
 
         return obj, dict_type
 
@@ -225,8 +252,8 @@ class TypeInference:
         _, target_type = self.exec(obj.target, **kwargs)
         _, value_type = self.exec(obj.value, expected_type=target_type, **kwargs)
 
-        if not self.typecheck(value_type, target_type):
-            print(f'type mismatch {value_type} != {target_type}')
+        if not self.typecheck(obj, value_type, target_type):
+            pass
 
         # target_type takes precedence here because that type comes
         # from the variable definition
@@ -282,7 +309,18 @@ class TypeInference:
         ...     name='b'
         ... )
         <class 'int'>
+
+        Process a type
+        >>> import ast
+        >>> type_expr = get_type("Tuple[int, float]").value
+        >>> type_expr.value.id
+        'Tuple'
+        >>> [e.id for e in type_expr.slice.value.elts]
+        ['int', 'float']
         """
+
+        if isinstance(obj.value, pyast.Name) and obj.value.id in typing_types:
+            return obj, TypeType
 
         # <value>[<slice>]
         _, object_type = self.exec(obj.value, **kwargs)
@@ -302,7 +340,7 @@ class TypeInference:
             fun = getattr(self, self._getname(obj))
             return fun(obj, **kwargs)
         except Exception as e:
-            print(f'Error when processing {obj}')
+            self.diagnostic(obj, f'Error when processing {obj}')
             raise e
 
     def _while(self, obj: ast.While, **kwargs):
@@ -341,7 +379,7 @@ class TypeInference:
             arg_types = callable_type.__args__[:-1]
             return_type = callable_type.__args__[-1]
         else:
-            print(f'Function call type not found for {obj.func}')
+            self.diagnostic(obj, f'Function call type not found for {obj.func}')
             arg_types = [MetaType() for _ in obj.args]
             return_type = MetaType()
 
@@ -350,11 +388,11 @@ class TypeInference:
             _, arg_type = self.exec(arg, expected_type=expected_type, **kwargs)
             args.append(arg_type)
 
-            if not self.typecheck(arg_type, expected_type):
-                print('mistyping')
+            if not self.typecheck(obj, arg_type, expected_type):
+                pass
 
-        if not self.typecheck(return_type, expected_return_type):
-            print('mistyping')
+        if not self.typecheck(obj, return_type, expected_return_type):
+            pass
 
         # Python nor C++ supports partial call natively
         return obj, return_type
@@ -367,15 +405,20 @@ class TypeInference:
         type = self.exec(expr.value)
         return expr, type
 
-    def typecheck(self, a, expected_type):
-        return True
+    def typecheck(self, obj, a, expected_type):
+        match = True
+
+        if not match:
+            self.diagnostic(obj, f'Typing error {a} != {expected_type}')
+
+        return match
 
     def annassign_global(self, expr: ast.AnnAssign):
         value, inferred_type = self.exec(expr.value)
         type_constraint = self.exec_type(expr.annotation)
 
-        if not self.typecheck(inferred_type, type_constraint):
-            print('Typing error')
+        if not self.typecheck(expr, inferred_type, type_constraint):
+            pass
 
         # Type annotation is user defined and take precedence on the inferred type
         # the reason why is that user can add type annotation to pin point exactly where
@@ -404,7 +447,7 @@ class TypeInference:
             return builtintypes[obj.id], TypeType
 
         if type is None and expected_type is None:
-            print(f'Untyped variable {obj.id}')
+            self.diagnostic(obj, f'Untyped variable {obj.id}')
 
         return obj, type
 
@@ -416,8 +459,8 @@ class TypeInference:
         # similar to what is done in ast.Call
         rhs, rhs_type = self.exec(obj.right, **kwargs)
 
-        if not self.typecheck(rhs_type, expected_type=lhs_type):
-            print('Binary op type mismatch')
+        if not self.typecheck(obj, rhs_type, expected_type=lhs_type):
+            pass
 
         return obj, rhs_type
 
@@ -454,13 +497,13 @@ class TypeInference:
         if expected_type and attr_type:
             # attr_type here is the expected type
             # expected_type is coming from the assign expression
-            self.typecheck(expected_type, attr_type)
+            self.typecheck(obj, expected_type, attr_type)
 
         if expected_type is None:
             expected_type = attr_type
 
         if expected_type is None:
-            print(f'Missing attribute type {obj}')
+            self.diagnostic(obj, f'Missing attribute type')
 
         if self.class_scopes:
             self.class_scopes[-1][obj.attr] = expected_type
@@ -472,7 +515,7 @@ class TypeInference:
         _, target_type = self.exec(obj.value, **kwargs)
 
         target_types = [target_type]
-        if len(obj.targets) > 1and hasattr(target_type, '__args__'):
+        if len(obj.targets) > 1 and hasattr(target_type, '__args__'):
             target_types = target_type.__args__
 
         for target, expected_type in zip(obj.targets, target_types):
@@ -484,8 +527,8 @@ class TypeInference:
         expected_type = self.exec_type(obj.annotation, **kwargs)
         expr, expr_type = self.exec(obj.value, **kwargs)
 
-        if not self.typecheck(expr_type, expected_type):
-            print(f'Type mismatch {expected_type} != {expr_type}')
+        if not self.typecheck(obj, expr_type, expected_type):
+            pass
 
         return obj, NoneType
 
@@ -520,6 +563,7 @@ class TypeInference:
         typing.Callable[[], int]
         """
         return_type, typetype = self.exec_type(obj.returns, **kwargs)
+
         return_type_inference = MetaType()
         if return_type:
             return_type_inference.add_clue(return_type)
@@ -566,10 +610,13 @@ class TypeInference:
 
     def classdef(self, obj: ast.ClassDef, **kwargs):
         with self.typing_context as scope:
+            ref = pyast.Name(id=obj.name)
+            scope.parent[obj.name] = ref
+
             self.class_scopes.append(scope)
             self.scopes[obj] = scope
             scope.name = obj.name
-            scope['self'] = obj
+            scope['self'] = ref
 
         self.class_scopes.pop()
         return obj, obj

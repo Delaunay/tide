@@ -58,7 +58,12 @@ libreplace = {
 builtintypes = {
     'int': int,
     'str': str,
-    'float': float
+    'float': float,
+    'Tuple': type
+}
+
+typing_types = {
+    'List', 'Tuple', 'Dict', 'Set'
 }
 
 

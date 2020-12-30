@@ -21,6 +21,7 @@ struct Point {
   Point (float x, float y);
   float sum ();
   ~Point ();
+  Tuple<float, float> astuple ();
   bool operator == (Point const& other) const;
   Point operator - (Point const& other) const;
   Point operator + (Point const& other) const;
