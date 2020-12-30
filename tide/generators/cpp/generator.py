@@ -220,7 +220,7 @@ class CppGenerator:
 
     def subscript(self, obj: ast.Subscript, **kwargs):
         if isinstance(obj.value, pyast.Name) and obj.value.id in typing_types:
-            types = [self.exec(e, **kwargs) for e in obj.slice.value.elts]
+            types = [self.exec_type(e, **kwargs) for e in obj.slice.value.elts]
             types = ', '.join(types)
 
             return f'{obj.value.id}<{types}>'

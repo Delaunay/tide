@@ -551,7 +551,7 @@ class TypeInference:
 
     def exec_type(self, expr, **kwargs):
         mytype, _ = self.exec(expr, **kwargs)
-        
+
         if isinstance(mytype, pyast.Str):
             return TypeVar(mytype.s), TypeType
 

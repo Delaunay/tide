@@ -37,10 +37,10 @@ void Expression::is_nul () {
 void Expression::is_leaf () {
   return false;
 }
-void Expression::eval (Dict<"Expression*", "Expression*"> variables) {
+void Expression::eval (Dict<Expression*, Expression*> variables) {
   " partially evaluate the expression";
 }
-void Expression::full_eval (Dict<"Expression*", "Expression*"> variables) {
+void Expression::full_eval (Dict<Expression*, Expression*> variables) {
   " fully evaluate the expression, every unknown must be specified";
 }
 void Expression::operator * (Expression* other) {
@@ -198,7 +198,7 @@ void ScalarReal::is_leaf () {
 void ScalarReal::derivate (Expression* x) {
   return zero();
 }
-void ScalarReal::eval (Dict<"Expression*", "Expression*"> variables) {
+void ScalarReal::eval (Dict<Expression*, Expression*> variables) {
       if (this->is_one()) {
       return one();
     };
@@ -207,7 +207,7 @@ void ScalarReal::eval (Dict<"Expression*", "Expression*"> variables) {
     };
   return this;
 }
-void ScalarReal::full_eval (Dict<"Expression*", "Expression*"> variables) {
+void ScalarReal::full_eval (Dict<Expression*, Expression*> variables) {
   return this->value;
 }
 void ScalarReal::apply_function (str function) {
@@ -258,13 +258,13 @@ void Unknown::derivate (Expression* x) {
     };
   return zero();
 }
-void Unknown::eval (Dict<"Expression*", "Expression*"> variables) {
+void Unknown::eval (Dict<Expression*, Expression*> variables) {
       if (contains(this, variables)) {
       return variables;
     };
   return this;
 }
-void Unknown::full_eval (Dict<"Expression*", "Expression*"> variables) {
+void Unknown::full_eval (Dict<Expression*, Expression*> variables) {
   return variables.full_eval(variables);
 }
 void Unknown::variables () {
@@ -282,7 +282,7 @@ void Addition::__repr__ () {
 void Addition::derivate (Expression* x) {
   return add(this->left.derivate(x), this->right.derivate(x));
 }
-void Addition::eval (Dict<"Expression*", "Expression*"> variables) {
+void Addition::eval (Dict<Expression*, Expression*> variables) {
   auto l = this->left.eval(variables);
   auto r = this->right.eval(variables);
       if (l.is_scalar() && r.is_scalar()) {
@@ -290,7 +290,7 @@ void Addition::eval (Dict<"Expression*", "Expression*"> variables) {
     };
   return add(l, r);
 }
-void Addition::full_eval (Dict<"Expression*", "Expression*"> variables) {
+void Addition::full_eval (Dict<Expression*, Expression*> variables) {
   return this->left.full_eval(variables) + this->right.full_eval(variables);
 }
 void Addition::apply_function (str function) {
@@ -311,7 +311,7 @@ void Subtraction::__repr__ () {
 void Subtraction::derivate (Expression* x) {
   return sub(this->left.derivate(x), this->right.derivate(x));
 }
-void Subtraction::eval (Dict<"Expression*", "Expression*"> variables) {
+void Subtraction::eval (Dict<Expression*, Expression*> variables) {
   auto l = this->left.eval(variables);
   auto r = this->right.eval(variables);
       if (l.is_scalar() && r.is_scalar()) {
@@ -319,7 +319,7 @@ void Subtraction::eval (Dict<"Expression*", "Expression*"> variables) {
     };
   return sub(l, r);
 }
-void Subtraction::full_eval (Dict<"Expression*", "Expression*"> variables) {
+void Subtraction::full_eval (Dict<Expression*, Expression*> variables) {
   return this->left.full_eval(variables) - this->right.full_eval(variables);
 }
 void Subtraction::apply_function (str function) {
@@ -340,7 +340,7 @@ void Multiplication::__repr__ () {
 void Multiplication::derivate (Expression* x) {
   return add(mult(this->left, this->right.derivate(x)), mult(this->right, this->left.derivate(x)));
 }
-void Multiplication::eval (Dict<"Expression*", "Expression*"> variables) {
+void Multiplication::eval (Dict<Expression*, Expression*> variables) {
   auto l = this->left.eval(variables);
   auto r = this->right.eval(variables);
       if (l.is_scalar() && r.is_scalar()) {
@@ -348,7 +348,7 @@ void Multiplication::eval (Dict<"Expression*", "Expression*"> variables) {
     };
   return mult(l, r);
 }
-void Multiplication::full_eval (Dict<"Expression*", "Expression*"> variables) {
+void Multiplication::full_eval (Dict<Expression*, Expression*> variables) {
   return this->left.full_eval(variables) * this->right.full_eval(variables);
 }
 void Multiplication::apply_function (str function) {
@@ -383,14 +383,14 @@ void Exp::__repr__ () {
 void Exp::derivate (Expression* x) {
   return mult(this->expr.derivate(x), this);
 }
-void Exp::eval (Dict<"Expression*", "Expression*"> variables) {
+void Exp::eval (Dict<Expression*, Expression*> variables) {
   auto l = this->expr.eval(variables);
       if (l.is_scalar()) {
       return scalar(math.exp(l.value));
     };
   return exp(l);
 }
-void Exp::full_eval (Dict<"Expression*", "Expression*"> variables) {
+void Exp::full_eval (Dict<Expression*, Expression*> variables) {
   return math.exp(this->expr.full_eval(variables));
 }
 void Exp::apply_function (str function) {
@@ -414,14 +414,14 @@ void Log::__repr__ () {
 void Log::derivate (Expression* x) {
   return div(this->expr.derivate(x), this->expr);
 }
-void Log::eval (Dict<"Expression*", "Expression*"> variables) {
+void Log::eval (Dict<Expression*, Expression*> variables) {
   auto l = this->expr.eval(variables);
       if (l.is_scalar()) {
       return scalar(math.log(l.value));
     };
   return log(l.value);
 }
-void Log::full_eval (Dict<"Expression*", "Expression*"> variables) {
+void Log::full_eval (Dict<Expression*, Expression*> variables) {
   return math.log(this->expr.full_eval(variables));
 }
 void Log::apply_function (str function) {
@@ -453,7 +453,7 @@ void Divide::derivate (Expression* x) {
   auto b = mult(this->left, this->right.derivate(x));
   return div(sub(a, b), pow(this->right, scalar(2)));
 }
-void Divide::eval (Dict<"Expression*", "Expression*"> variables) {
+void Divide::eval (Dict<Expression*, Expression*> variables) {
   auto l = this->left.eval(variables);
   auto r = this->right.eval(variables);
       if (l.is_scalar() && r.is_scalar()) {
@@ -461,7 +461,7 @@ void Divide::eval (Dict<"Expression*", "Expression*"> variables) {
     };
   return div(l, r);
 }
-void Divide::full_eval (Dict<"Expression*", "Expression*"> variables) {
+void Divide::full_eval (Dict<Expression*, Expression*> variables) {
   return this->left.full_eval(variables) / this->right.full_eval(variables);
 }
 void Divide::apply_function (str function) {
@@ -488,7 +488,7 @@ void Pow::__repr__ () {
 void Pow::derivate (Expression* x) {
   return mult(mult(this->power(), this->expr().derivate(x)), pow(this->expr(), add(this->power(), minus_one())));
 }
-void Pow::eval (Dict<"Expression*", "Expression*"> variables) {
+void Pow::eval (Dict<Expression*, Expression*> variables) {
   auto l = this->left.eval(variables);
   auto r = this->right.eval(variables);
       if (l.is_scalar() && r.is_scalar()) {
@@ -496,7 +496,7 @@ void Pow::eval (Dict<"Expression*", "Expression*"> variables) {
     };
   return pow(l, r);
 }
-void Pow::full_eval (Dict<"Expression*", "Expression*"> variables) {
+void Pow::full_eval (Dict<Expression*, Expression*> variables) {
   return pow(this->left.full_eval(variables), this->right.full_eval(variables));
 }
 void Pow::apply_function (str function) {

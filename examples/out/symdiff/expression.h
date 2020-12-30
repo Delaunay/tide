@@ -19,8 +19,8 @@ struct Expression {
   virtual void is_one ();
   virtual void is_nul ();
   virtual void is_leaf ();
-  virtual void eval (Dict<"Expression*", "Expression*"> variables);
-  virtual void full_eval (Dict<"Expression*", "Expression*"> variables);
+  virtual void eval (Dict<Expression*, Expression*> variables);
+  virtual void full_eval (Dict<Expression*, Expression*> variables);
   virtual void operator * (Expression* other);
   virtual void operator + (Expression* other);
   virtual void __truediv__ (Expression* other);
@@ -70,8 +70,8 @@ struct ScalarReal: public Expression {
   virtual void is_nul ();
   virtual void is_leaf ();
   virtual void derivate (Expression* x);
-  virtual void eval (Dict<"Expression*", "Expression*"> variables);
-  virtual void full_eval (Dict<"Expression*", "Expression*"> variables);
+  virtual void eval (Dict<Expression*, Expression*> variables);
+  virtual void full_eval (Dict<Expression*, Expression*> variables);
   virtual void apply_function (str function);
   virtual void _id ();
 };
@@ -94,8 +94,8 @@ struct Unknown: public Expression {
   virtual void _id ();
   virtual void is_leaf ();
   virtual void derivate (Expression* x);
-  virtual void eval (Dict<"Expression*", "Expression*"> variables);
-  virtual void full_eval (Dict<"Expression*", "Expression*"> variables);
+  virtual void eval (Dict<Expression*, Expression*> variables);
+  virtual void full_eval (Dict<Expression*, Expression*> variables);
   virtual void variables ();
 };
 struct Addition: public BinaryOperator {
@@ -104,8 +104,8 @@ struct Addition: public BinaryOperator {
   virtual void __str__ ();
   virtual void __repr__ ();
   virtual void derivate (Expression* x);
-  virtual void eval (Dict<"Expression*", "Expression*"> variables);
-  virtual void full_eval (Dict<"Expression*", "Expression*"> variables);
+  virtual void eval (Dict<Expression*, Expression*> variables);
+  virtual void full_eval (Dict<Expression*, Expression*> variables);
   virtual void apply_function (str function);
   virtual void _id ();
 };
@@ -115,8 +115,8 @@ struct Subtraction: public BinaryOperator {
   virtual void __str__ ();
   virtual void __repr__ ();
   virtual void derivate (Expression* x);
-  virtual void eval (Dict<"Expression*", "Expression*"> variables);
-  virtual void full_eval (Dict<"Expression*", "Expression*"> variables);
+  virtual void eval (Dict<Expression*, Expression*> variables);
+  virtual void full_eval (Dict<Expression*, Expression*> variables);
   virtual void apply_function (str function);
   virtual void _id ();
 };
@@ -126,8 +126,8 @@ struct Multiplication: public BinaryOperator {
   virtual void __str__ ();
   virtual void __repr__ ();
   virtual void derivate (Expression* x);
-  virtual void eval (Dict<"Expression*", "Expression*"> variables);
-  virtual void full_eval (Dict<"Expression*", "Expression*"> variables);
+  virtual void eval (Dict<Expression*, Expression*> variables);
+  virtual void full_eval (Dict<Expression*, Expression*> variables);
   virtual void apply_function (str function);
   virtual void copy ();
   virtual void simplify ();
@@ -140,8 +140,8 @@ struct Exp: public UnaryOperator {
   virtual void __str__ ();
   virtual void __repr__ ();
   virtual void derivate (Expression* x);
-  virtual void eval (Dict<"Expression*", "Expression*"> variables);
-  virtual void full_eval (Dict<"Expression*", "Expression*"> variables);
+  virtual void eval (Dict<Expression*, Expression*> variables);
+  virtual void full_eval (Dict<Expression*, Expression*> variables);
   virtual void apply_function (str function);
   virtual void cancel ();
   virtual void _id ();
@@ -152,8 +152,8 @@ struct Log: public UnaryOperator {
   virtual void __str__ ();
   virtual void __repr__ ();
   virtual void derivate (Expression* x);
-  virtual void eval (Dict<"Expression*", "Expression*"> variables);
-  virtual void full_eval (Dict<"Expression*", "Expression*"> variables);
+  virtual void eval (Dict<Expression*, Expression*> variables);
+  virtual void full_eval (Dict<Expression*, Expression*> variables);
   virtual void apply_function (str function);
   virtual void cancel ();
   virtual void _id ();
@@ -166,8 +166,8 @@ struct Divide: public BinaryOperator {
   virtual void up ();
   virtual void down ();
   virtual void derivate (Expression* x);
-  virtual void eval (Dict<"Expression*", "Expression*"> variables);
-  virtual void full_eval (Dict<"Expression*", "Expression*"> variables);
+  virtual void eval (Dict<Expression*, Expression*> variables);
+  virtual void full_eval (Dict<Expression*, Expression*> variables);
   virtual void apply_function (str function);
   virtual void _id ();
 };
@@ -179,8 +179,8 @@ struct Pow: public BinaryOperator {
   virtual void __str__ ();
   virtual void __repr__ ();
   virtual void derivate (Expression* x);
-  virtual void eval (Dict<"Expression*", "Expression*"> variables);
-  virtual void full_eval (Dict<"Expression*", "Expression*"> variables);
+  virtual void eval (Dict<Expression*, Expression*> variables);
+  virtual void full_eval (Dict<Expression*, Expression*> variables);
   virtual void apply_function (str function);
   virtual void _id ();
 };
