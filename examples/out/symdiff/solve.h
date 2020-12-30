@@ -9,7 +9,7 @@ extern auto __author__;
 namespace symdiff::solve {
 
 void counter (Expression t, Expression v);
-Expression solve (Expression function, int value, bool show_steps);
+void solve (Expression function, int value, bool show_steps);
 extern auto x;
 extern auto y;
 extern auto f1;

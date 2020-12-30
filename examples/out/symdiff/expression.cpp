@@ -101,7 +101,7 @@ int Expression::_id () {
 bool Expression::operator < (Expression* other) {
   return this->_id() < other._id();
 }
-Tuple reorder (Expression* a, Expression* b) {
+void reorder (Expression* a, Expression* b) {
   auto ia = a._id();
   auto ib = b._id();
     if (ia < ib) {
@@ -217,16 +217,16 @@ Expression* __one = ScalarReal(1);
 Expression* __zero = ScalarReal(0);
 Expression* __minus_one = ScalarReal(- 1);
 Expression* __two = ScalarReal(2);
-Expression* one () {
+void one () {
   return __one;
 }
-Expression* zero () {
+void zero () {
   return __zero;
 }
-Expression* minus_one () {
+void minus_one () {
   return __minus_one;
 }
-Expression* two () {
+void two () {
   return __two;
 }
 Unknown::Unknown (str name, tuple size) {
@@ -520,13 +520,13 @@ int MathConstant::_id () {
 }
 auto __euler = MathConstant("e", 2.718281828459045);
 auto __pi = MathConstant("pi", 3.141592653589793);
-Expression* pi () {
+void pi () {
   return __pi;
 }
-Expression* e () {
+void e () {
   return __euler;
 }
-Expression* add (Expression* l, Expression* r) {
+void add (Expression* l, Expression* r) {
   std::make_tuple(l, r) = reorder(l, r);
     if (l.is_nul()) {
     return r;
@@ -565,7 +565,7 @@ Expression* add (Expression* l, Expression* r) {
   };
   return Addition(l, r);
 }
-Expression* mult (Expression* l, Expression* r) {
+void mult (Expression* l, Expression* r) {
   std::make_tuple(l, r) = reorder(l, r);
     if (l.is_nul() || r.is_nul()) {
     return zero();
@@ -609,7 +609,7 @@ Expression* mult (Expression* l, Expression* r) {
   };
   return Multiplication(l, r);
 }
-Expression* exp (Expression* expr) {
+void exp (Expression* expr) {
     if (expr.is_nul()) {
     return one();
   };
@@ -621,7 +621,7 @@ Expression* exp (Expression* expr) {
   };
   return Exp(expr);
 }
-Expression* pow (Expression* expr, Expression* power) {
+void pow (Expression* expr, Expression* power) {
     if (power.is_nul()) {
     return one();
   };
@@ -636,7 +636,7 @@ Expression* pow (Expression* expr, Expression* power) {
   };
   return Pow(expr, power);
 }
-Expression* log (Expression* expr) {
+void log (Expression* expr) {
     if (expr.is_one()) {
     return zero();
   };
@@ -648,7 +648,7 @@ Expression* log (Expression* expr) {
   };
   return Log(expr);
 }
-Expression* div (Expression* up, Expression* down) {
+void div (Expression* up, Expression* down) {
     if (down.is_one()) {
     return up;
   };
@@ -689,7 +689,7 @@ Expression* div (Expression* up, Expression* down) {
   };
   return Divide(up, down);
 }
-Expression* scalar (float v) {
+void scalar (float v) {
     if (v == 0) {
     return zero();
   };
@@ -704,7 +704,7 @@ Expression* scalar (float v) {
   };
   return ScalarReal(v);
 }
-Expression* sub (Expression* l, Expression* r) {
+void sub (Expression* l, Expression* r) {
     if (l == r) {
     return zero();
   };

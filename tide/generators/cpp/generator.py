@@ -6,9 +6,14 @@ from tide.generators.utils import reserved, compop, binop, unaryoperators, boolo
 
 
 class CppGenerator:
-    def __init__(self, project: ProjectFolder, filename):
+    """"""
+    def __init__(self, project: ProjectFolder, filename, typing_context=None):
         self.header = []
         self.impl = []
+
+        if typing_context is None:
+            typing_context = dict()
+        self.typing_context = typing_context
 
         self.project = project
         self.filename = filename
@@ -235,6 +240,14 @@ class CppGenerator:
         except Exception as e:
             self.diagnostic(obj, f'Error when processing {obj}')
             raise e
+
+    def _genericalias(self, obj, **kwargs):
+        print(obj)
+        return
+
+    def metatype(self, obj, **kwargs):
+        print(obj)
+        return
 
     def _while(self, obj: ast.While, depth, **kwargs):
         test = self.exec(obj.test, depth=depth, **kwargs)

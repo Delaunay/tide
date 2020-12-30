@@ -7,7 +7,7 @@ using math = myproject::math;
 
 namespace containers::point {
 
-float add (float a, float b);
+void add (float a, float b);
 
 } // containers::point
 #include "myproject/math.h"

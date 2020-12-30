@@ -2,7 +2,7 @@
 
 namespace containers::point {
 
-float add (float a, float b) {
+void add (float a, float b) {
   return math::add(a, b);
 }
 Point::Point (float x, float y) {

@@ -45,16 +45,16 @@ class UnionType(KiwiType):
 def get_type(code, name=None):
     import ast
     module = ast.parse(code)
-    inferrer = TypeInference(ProjectFolder('.'), '')
+    inferer = TypeInference(ProjectFolder('.'), '')
 
     expr_type = None
     for b in module.body:
-        _, expr_type = inferrer.exec(b)
+        _, expr_type = inferer.exec(b)
 
     if name is None:
         return expr_type
 
-    return inferrer.typing_context.get(name)
+    return inferer.typing_context.get(name)
 
 
 class TypingContext:
@@ -94,7 +94,8 @@ class TypeInference:
         self.typing_context = TypingContext(self)
         self.class_scopes = []
         self.function_scopes = []
-        self.scopes = dict()
+        # Hold the typing information for all expressions inside a module
+        self.scopes = dict(root=self.typing_context)
 
     @staticmethod
     def _getname(obj):
@@ -172,7 +173,7 @@ class TypeInference:
         _, t = self.infer_container(obj, **kwargs)
         return obj, List[t]
 
-    def dict(self, obj: ast.Dict, **kwargs):
+    def dict(self, obj: ast.Dict, expected_type=None, **kwargs):
         """
         Examples
         --------
@@ -190,7 +191,22 @@ class TypeInference:
             _, value_type = self.exec(v, expected_type=value_type, **kwargs)
             types.append((key_type, value_type))
 
-        first = types[0]
+        first = [None, None]
+
+        for kt, vt in types:
+            if not isinstance(kt, MetaType):
+                first[0] = kt
+
+            if not isinstance(vt, MetaType):
+                first[1] = vt
+
+        if first[0] is None and first[1] is None:
+            if expected_type is None:
+                return obj, Dict[TypeVar('K'), TypeVar('V')]
+            else:
+                # TODO check that expected_type is a Dict at the very least
+                return obj, expected_type
+
         for kt, vt in types:
             if isinstance(kt, first[0]):
                 print(f'warning type mismatch {kt} != {first[0]}')
@@ -243,6 +259,7 @@ class TypeInference:
 
     def run(self, module):
         self.exec(module, depth=0)
+        return self.scopes
 
     def boolop(self, obj: ast.BoolOp, **kwargs):
         for b in obj.values:
@@ -298,7 +315,7 @@ class TypeInference:
     def _pass(self, obj: ast.Pass, **kwargs):
         return obj, None
 
-    def call(self, obj: ast.Call, **kwargs):
+    def call(self, obj: ast.Call, expected_type=None, **kwargs):
         """
         Examples
         --------
@@ -313,9 +330,16 @@ class TypeInference:
         ... )
         <class 'int'>
         """
+        expected_return_type = expected_type
         fun, callable_type = self.exec(obj.func, **kwargs)
-        arg_types = callable_type.__args__[:-1]
-        return_type = callable_type.__args__[-1]
+
+        if hasattr(callable_type, '__args__'):
+            arg_types = callable_type.__args__[:-1]
+            return_type = callable_type.__args__[-1]
+        else:
+            print(f'Function call type not found for {obj.func}')
+            arg_types = [MetaType() for _ in obj.args]
+            return_type = MetaType()
 
         args = []
         for arg, expected_type in zip(obj.args, arg_types):
@@ -324,6 +348,9 @@ class TypeInference:
 
             if not self.typecheck(arg_type, expected_type):
                 print('mistyping')
+
+        if not self.typecheck(return_type, expected_return_type):
+            print('mistyping')
 
         # Python nor C++ supports partial call natively
         return obj, return_type
@@ -459,7 +486,14 @@ class TypeInference:
         return obj, NoneType
 
     def exec_type(self, expr, **kwargs):
-        return self.exec(expr, **kwargs)
+        mytype, _ = self.exec(expr, **kwargs)
+        if isinstance(mytype, pyast.Str):
+            return TypeVar(mytype.s), TypeType
+
+        if isinstance(mytype, pyast.Name):
+            return TypeVar(mytype.id), TypeType
+
+        return mytype, TypeType
 
     def functiondef(self, obj: ast.FunctionDef, **kwargs):
         """
@@ -509,7 +543,12 @@ class TypeInference:
         return_type = return_type_inference.infer()
         obj.returns = return_type
 
-        fun_type = Callable[args, return_type]
+        if not isinstance(return_type, MetaType):
+            fun_type = Callable[args, return_type]
+
+        fun_type = MetaType()
+        fun_type.add_clue((args, return_type))
+
         self.typing_context[obj.name] = fun_type
         self.function_scopes.pop()
         return obj, fun_type

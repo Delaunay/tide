@@ -38,7 +38,7 @@ struct Expression {
   virtual int _id ();
   virtual bool operator < (Expression* other);
 };
-Tuple reorder (Expression* a, Expression* b);
+void reorder (Expression* a, Expression* b);
 struct UnaryOperator: public Expression {
   Expression expr;
 
@@ -78,10 +78,10 @@ extern Expression* __one;
 extern Expression* __zero;
 extern Expression* __minus_one;
 extern Expression* __two;
-Expression* one ();
-Expression* zero ();
-Expression* minus_one ();
-Expression* two ();
+void one ();
+void zero ();
+void minus_one ();
+void two ();
 struct Unknown: public Expression {
   str name;
   int size;
@@ -194,16 +194,16 @@ struct MathConstant: public ScalarReal {
 };
 extern auto __euler;
 extern auto __pi;
-Expression* pi ();
-Expression* e ();
-Expression* add (Expression* l, Expression* r);
-Expression* mult (Expression* l, Expression* r);
-Expression* exp (Expression* expr);
-Expression* pow (Expression* expr, Expression* power);
-Expression* log (Expression* expr);
-Expression* div (Expression* up, Expression* down);
-Expression* scalar (float v);
-Expression* sub (Expression* l, Expression* r);
+void pi ();
+void e ();
+void add (Expression* l, Expression* r);
+void mult (Expression* l, Expression* r);
+void exp (Expression* expr);
+void pow (Expression* expr, Expression* power);
+void log (Expression* expr);
+void div (Expression* up, Expression* down);
+void scalar (float v);
+void sub (Expression* l, Expression* r);
 int __main__(int argc, const char* argv[]);
 
 } // symdiff::expression

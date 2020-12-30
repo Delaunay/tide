@@ -19,7 +19,12 @@ class ProjectConverter:
                 code = f.read()
 
             module = pyast.parse(code, filename=file)
-            header, impl = CppGenerator(self.project, file).run(module)
+
+            # augment the source code with the required typing
+            inferer = TypeInference(self.project, file)
+            typing_context = inferer.run(module)
+
+            header, impl = CppGenerator(self.project, file, typing_context).run(module)
 
             path = os.path.join(self.destination, self.project.project_name)
             with open(os.path.join(path, file.replace('.py', '.cpp')), 'w') as implfile:
