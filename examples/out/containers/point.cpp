@@ -9,37 +9,37 @@ Point::Point (float x, float y) {
   this->x = x;
   this->y = y;
 }
-float Point::sum () {
+void Point::sum () {
   return this->x + this->y;
 }
 Point::~Point () {
   return ;
 }
-Tuple<float, float> Point::astuple () {
+void Point::astuple () {
   return std::make_tuple(this->x, this->y);
 }
-bool Point::operator == (Point const& other) const {
+void Point::operator == (Point const& other) const {
   return this->x == other.x && this->y == other.y;
 }
-Point Point::operator - (Point const& other) const {
+void Point::operator - (Point const& other) const {
   return Point(this->x - other.x, this->y - other.y);
 }
-Point Point::operator + (Point const& other) const {
+void Point::operator + (Point const& other) const {
   return Point(this->x + other.x, this->y + other.y);
 }
-Point Point::operator * (Point const& other) const {
+void Point::operator * (Point const& other) const {
   return Point(this->x * other.x, this->y * other.y);
 }
-float Point::dot (Point const& other) {
+void Point::dot (Point const& other) {
   return this->x * other.x + this->y * other.y;
 }
 void Point::other () {
 
 }
-float Point::dist () {
+void Point::dist () {
   return math::sqrt(this->dot(this));
 }
-float Point::distance (Point const& a, Point const& b) {
+void Point::distance (Point const& a, Point const& b) {
   auto v = a - b;
   return v.dist();
 }

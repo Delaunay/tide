@@ -21,6 +21,9 @@ class MetaType:
         if len(self.clues) == 1:
             return self.clues[0]
 
+        if len(self.clues) == 0:
+            return NoneType
+
         return self.clues[-1]
 
 
@@ -167,10 +170,15 @@ class TypeInference:
             _, element_type = self.exec(e, expected_type=element_type, **kwargs)
             types.append(element_type)
 
-        first = types[0]
-        for element_type in types:
-            if isinstance(element_type, first):
-                self.diagnostic(obj, f'type mismatch {element_type} != {first}')
+        first = TypeVar('T')
+        if len(types) > 0 and not isinstance(types[0], MetaType):
+            first = types[0]
+
+            for element_type in types:
+                if isinstance(element_type, first):
+                    self.diagnostic(obj, f'type mismatch {element_type} != {first}')
+        else:
+            self.diagnostic(obj, 'was not able to infer type')
 
         return obj, first
 
@@ -340,7 +348,8 @@ class TypeInference:
             fun = getattr(self, self._getname(obj))
             return fun(obj, **kwargs)
         except Exception as e:
-            self.diagnostic(obj, f'Error when processing {obj}')
+
+            self.diagnostic(obj, f'Error when processing {self.class_name()}::{self.function_name()} in {obj}')
             raise e
 
     def _while(self, obj: ast.While, **kwargs):
@@ -477,6 +486,14 @@ class TypeInference:
         # This should fetch the imported element so we can type check its usage
         return obj, None
 
+    def attribute_type(self, obj: ast.Attribute):
+        obj, obj_type = self.exec(obj.value)
+
+
+        print(obj, obj_type)
+
+        return MetaType()
+
     def attribute(self, obj: ast.Attribute, expected_type=None, **kwargs):
         """
         Examples
@@ -492,7 +509,7 @@ class TypeInference:
         ... )
         <class 'int'>
         """
-        attr_type = self.typing_context.get(obj.attr)
+        attr_type = self.attribute_type(obj)
 
         if expected_type and attr_type:
             # attr_type here is the expected type
@@ -503,7 +520,7 @@ class TypeInference:
             expected_type = attr_type
 
         if expected_type is None:
-            self.diagnostic(obj, f'Missing attribute type')
+            self.diagnostic(obj, f'Missing attribute type {pyast.dump(obj)}')
 
         if self.class_scopes:
             self.class_scopes[-1][obj.attr] = expected_type
@@ -534,6 +551,7 @@ class TypeInference:
 
     def exec_type(self, expr, **kwargs):
         mytype, _ = self.exec(expr, **kwargs)
+        
         if isinstance(mytype, pyast.Str):
             return TypeVar(mytype.s), TypeType
 
@@ -617,6 +635,10 @@ class TypeInference:
             self.scopes[obj] = scope
             scope.name = obj.name
             scope['self'] = ref
+
+            # need to extract the arguments of the __init__ function
+            for b in obj.body:
+                self.exec(b, **kwargs)
 
         self.class_scopes.pop()
         return obj, obj

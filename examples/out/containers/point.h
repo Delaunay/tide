@@ -19,17 +19,17 @@ struct Point {
   float y;
 
   Point (float x, float y);
-  float sum ();
+  void sum ();
   ~Point ();
-  Tuple<float, float> astuple ();
-  bool operator == (Point const& other) const;
-  Point operator - (Point const& other) const;
-  Point operator + (Point const& other) const;
-  Point operator * (Point const& other) const;
-  float dot (Point const& other);
+  void astuple ();
+  void operator == (Point const& other) const;
+  void operator - (Point const& other) const;
+  void operator + (Point const& other) const;
+  void operator * (Point const& other) const;
+  void dot (Point const& other);
   void other ();
-  float dist ();
-  static float distance (Point const& a, Point const& b);
+  void dist ();
+  static void distance (Point const& a, Point const& b);
 };
 extern Point zero;
 int __main__(int argc, const char* argv[]);

@@ -247,6 +247,12 @@ class CppGenerator:
             self.diagnostic(obj, f'Error when processing {obj}')
             raise e
 
+    def type(self, obj, **kwargs):
+        print(obj)
+
+    def typevar(self, obj, **kwargs):
+        print(obj)
+
     def _genericalias(self, obj, **kwargs):
         print(obj)
         return

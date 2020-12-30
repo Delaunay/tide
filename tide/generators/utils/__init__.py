@@ -59,7 +59,8 @@ builtintypes = {
     'int': int,
     'str': str,
     'float': float,
-    'Tuple': type
+    'Tuple': type,
+    'bool': bool,
 }
 
 typing_types = {
