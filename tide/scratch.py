@@ -1,13 +1,14 @@
 from typing import *
 
-call = Callable[[int, float], str]
 
-print(call)
-print( call.__args__)
-print(dir(call))
+def add(a, b):
+    return a + b
 
-tup = Tuple[int, int]
-print(tup.__args__)
+
+print(add('x', 'b'))
+print(add(1, 2))
+print(add('x', 2))
+
 
 
 # # -*- coding: utf-8 -*-

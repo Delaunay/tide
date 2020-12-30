@@ -352,6 +352,17 @@ class TypeInference:
         return expr, type_constraint
 
     def name(self, obj: ast.Name, expected_type=None, **kwargs):
+        """
+        Examples
+        --------
+        Guess variable's typing from its value
+        >>> import ast
+        >>> get_type(
+        ...     "a = 1\\n"
+        ...     "a\\n"
+        ... )
+        <class 'int'>
+        """
         type = self.typing_context.get(obj.id, None)
 
         if type is None and expected_type is not None:
@@ -393,6 +404,20 @@ class TypeInference:
         return obj, None
 
     def attribute(self, obj: ast.Attribute, expected_type=None, **kwargs):
+        """
+        Examples
+        --------
+        Guess variable's typing from its value
+        >>> import ast
+        >>> get_type(
+        ...     "class P:\\n"
+        ...     "   def __init__(self):\\n"
+        ...     "       self.a = 1\\n"
+        ...     "p = P()\\n"
+        ...     "p.a\\n"
+        ... )
+        <class 'int'>
+        """
         attr_type = self.typing_context.get(obj.attr)
 
         if expected_type and attr_type:
