@@ -214,7 +214,11 @@ class TypeInference:
             if isinstance(vt, first[1]):
                 print(f'warning type mismatch {vt} != {first[0]}')
 
-        return obj, Dict[first[0], first[1]]
+        dict_type = Dict[first[0], first[1]]
+        if expected_type is not None and not self.typecheck(dict_type, expected_type):
+            print('type mismatch')
+
+        return obj, dict_type
 
     def augassign(self, obj: ast.AugAssign, **kwargs):
         # the variable we are setting should be already defined
@@ -543,11 +547,8 @@ class TypeInference:
         return_type = return_type_inference.infer()
         obj.returns = return_type
 
-        if not isinstance(return_type, MetaType):
-            fun_type = Callable[args, return_type]
-
-        fun_type = MetaType()
-        fun_type.add_clue((args, return_type))
+        fun_type = Callable[[], None]
+        fun_type.__args__ = args + [return_type]
 
         self.typing_context[obj.name] = fun_type
         self.function_scopes.pop()

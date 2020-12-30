@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 __author__ = 'Pierre Delaunay'
+from tide.runtime.kiwi import Dict, Tuple
+
 import math
-from typing import Dict
 
 
 class Expression:
