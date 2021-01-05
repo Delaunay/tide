@@ -1,48 +1,11 @@
 import ast as pyast
-from typing import *
 
 import tide.generators.nodes as ast
 from tide.generators.utils import ProjectFolder
-from tide.generators.utils import reserved, builtintypes, typing_types
+from tide.generators.utils import reserved, builtintypes, typing_types, operator_magic
 
-
-class KiwiType:
-    pass
-
-
-class MetaType:
-    def __init__(self):
-        self.clues = []
-
-    def add_clue(self, clue):
-        self.clues.append(clue)
-
-    def infer(self):
-        if len(self.clues) == 1:
-            return self.clues[0]
-
-        if len(self.clues) == 0:
-            return NoneType
-
-        return self.clues[-1]
-
-
-class NoneType(KiwiType):
-    pass
-
-
-class TypeType(KiwiType):
-    pass
-
-
-class StructType(KiwiType):
-    def __init__(self, types):
-        self.types = types
-
-
-class UnionType(KiwiType):
-    def __init__(self, types):
-        self.types = types
+from tide.generators.cpp.retypes import *
+from tide.generators.cpp.parse_type import CType
 
 
 def get_type(code, name=None):
@@ -70,6 +33,17 @@ class TypingContext:
         self.parent = parent
         self.depth = depth
         self.scope = dict()
+
+    def __iter__(self):
+        return self
+
+    def items(self):
+        for r in self.scope.items():
+            yield r
+
+        if self.parent is not None:
+            for r in self.parent.items():
+                yield r
 
     def __setitem__(self, key, value):
         self.scope[key] = value
@@ -102,6 +76,7 @@ class TypeInference:
         self.function_scopes = []
         # Hold the typing information for all expressions inside a module
         self.scopes = dict(root=self.typing_context)
+        self.init_capture = False
 
     def class_name(self):
         if self.class_scopes:
@@ -147,9 +122,7 @@ class TypeInference:
             value, type = self.exec(e, **kwargs)
             types.append(type)
 
-        type = Tuple[()]
-        type.__args__ = tuple(types)
-        return obj, type
+        return obj, Generic('Tuple', *types)
 
     def _raise(self, obj: ast.Raise, depth, **kwargs):
         return obj, None
@@ -170,7 +143,7 @@ class TypeInference:
             _, element_type = self.exec(e, expected_type=element_type, **kwargs)
             types.append(element_type)
 
-        first = TypeVar('T')
+        first = MetaType()
         if len(types) > 0 and not isinstance(types[0], MetaType):
             first = types[0]
 
@@ -193,7 +166,7 @@ class TypeInference:
         typing.Set[int]
         """
         _, t = self.infer_container(obj, **kwargs)
-        return obj, Set[t]
+        return obj, Generic('Set', t)
 
     def list(self, obj: ast.List, **kwargs):
         """
@@ -206,7 +179,7 @@ class TypeInference:
         typing.List[int]
         """
         _, t = self.infer_container(obj, **kwargs)
-        return obj, List[t]
+        return obj, Generic('List', t)
 
     def dict(self, obj: ast.Dict, expected_type=None, **kwargs):
         """
@@ -237,7 +210,7 @@ class TypeInference:
 
         if first[0] is None and first[1] is None:
             if expected_type is None:
-                return obj, Dict[TypeVar('K'), TypeVar('V')]
+                return obj, Generic('Dict', MetaType(), MetaType())
             else:
                 # TODO check that expected_type is a Dict at the very least
                 return obj, expected_type
@@ -249,7 +222,7 @@ class TypeInference:
             if isinstance(vt, first[1]):
                 self.diagnostic(obj, f'type mismatch {vt} != {first[0]}')
 
-        dict_type = Dict[first[0], first[1]]
+        dict_type = Generic('Dict', first[0], first[1])
         if expected_type is not None and not self.typecheck(obj, dict_type, expected_type):
             pass
 
@@ -303,6 +276,7 @@ class TypeInference:
     def boolop(self, obj: ast.BoolOp, **kwargs):
         for b in obj.values:
             self.exec(b, **kwargs)
+
         return obj, bool
 
     def subscript(self, obj: ast.Subscript, **kwargs):
@@ -335,12 +309,20 @@ class TypeInference:
         element_type = object_type
 
         # TODO: hack for now
-        if hasattr(object_type, '__args__') and isinstance(obj.slice, pyast.Index):
-            element_type = object_type.__args__[0]
+        if isinstance(object_type, Generic) and isinstance(obj.slice, pyast.Index):
+            element_type = object_type.types[0]
 
         return obj, element_type
 
     def importfrom(self, obj: ast.ImportFrom, **kwargs):
+        for alias in obj.names:
+            name = alias.name
+            if alias.asname is not None:
+                name = alias.asname
+
+            # TODO: get the type of the imported entity
+            self.typing_context[name] = None
+
         return obj, None
 
     def exec(self, obj, **kwargs):
@@ -384,11 +366,24 @@ class TypeInference:
         expected_return_type = expected_type
         fun, callable_type = self.exec(obj.func, **kwargs)
 
-        if hasattr(callable_type, '__args__'):
-            arg_types = callable_type.__args__[:-1]
-            return_type = callable_type.__args__[-1]
+        if isinstance(callable_type, Callable):
+            arg_types = callable_type.args
+            return_type = callable_type.return_type
+
+        elif isinstance(callable_type, pyast.ClassDef):
+            scope = self.scopes[callable_type]
+            ctor_type = scope.get('__init__')
+
+            if isinstance(ctor_type, Callable):
+                arg_types = ctor_type.args
+                return_type = ctor_type.return_type
+            else:
+                self.diagnostic(obj, f'Unable to process object constructor {callable_type} => {ctor_type}')
+                arg_types = [MetaType() for _ in obj.args]
+                return_type = MetaType()
+
         else:
-            self.diagnostic(obj, f'Function call type not found for {obj.func}')
+            self.diagnostic(obj, f'Function call type not found for {pyast.dump(obj.func)} type={callable_type}')
             arg_types = [MetaType() for _ in obj.args]
             return_type = MetaType()
 
@@ -460,8 +455,30 @@ class TypeInference:
 
         return obj, type
 
+    def fetch_type_scope(self, obj):
+        if isinstance(obj, CType):
+            obj = self.typing_context.get(obj.typename)
+            scope = self.scopes.get(obj)
+            return scope
+
     def binop(self, obj: ast.BinOp, **kwargs):
         lhs, lhs_type = self.exec(obj.left, **kwargs)
+        scope = self.fetch_type_scope(lhs_type)
+
+        if scope is None:
+            self.diagnostic(obj, f'Unable to find context for {lhs_type}')
+        else:
+            magic_method = operator_magic.get(type(obj.op))
+            method_type = scope.get(magic_method)
+
+            if method_type is None:
+                self.diagnostic(obj, f'Type {lhs_type} does not have the {type(obj.op)} ({magic_method}) operator')
+
+                for k, v in scope.items():
+                    print(f'{k:>30} {v}')
+
+            print(method_type)
+
         # TODO: check if the operator is supported by that type
         # This is wrong we can expect rhs & lhs to be of a different types
         # we should fetch the function that match and return its return_type
@@ -487,12 +504,12 @@ class TypeInference:
         return obj, None
 
     def attribute_type(self, obj: ast.Attribute):
-        obj, obj_type = self.exec(obj.value)
+        # <value>.<attr>
+        value, value_type = self.exec(obj.value)
 
-
-        print(obj, obj_type)
-
-        return MetaType()
+        # TODO: lookup the type of <attr> in particular
+        print('TODO lookup', value_type, pyast.dump(obj.value))
+        return value_type
 
     def attribute(self, obj: ast.Attribute, expected_type=None, **kwargs):
         """
@@ -509,12 +526,12 @@ class TypeInference:
         ... )
         <class 'int'>
         """
-        attr_type = self.attribute_type(obj)
 
-        if expected_type and attr_type:
-            # attr_type here is the expected type
-            # expected_type is coming from the assign expression
-            self.typecheck(obj, expected_type, attr_type)
+        # if expected_type is populated that means we are coming from an assign expression
+        # we guessed the type from the value we assigned it to
+        attr_type = None
+        if not expected_type:
+            attr_type = self.attribute_type(obj)
 
         if expected_type is None:
             expected_type = attr_type
@@ -529,20 +546,21 @@ class TypeInference:
         return obj, expected_type
 
     def assign(self, obj: ast.Assign, **kwargs):
+        # check the value first to guess the type of the target
         _, target_type = self.exec(obj.value, **kwargs)
 
         target_types = [target_type]
-        if len(obj.targets) > 1 and hasattr(target_type, '__args__'):
-            target_types = target_type.__args__
+        if len(obj.targets) > 1 and isinstance(target_type, Generic):
+            target_types = target_type.types
 
         for target, expected_type in zip(obj.targets, target_types):
             self.exec(target, expected_type=expected_type, **kwargs)
 
         return obj, NoneType
 
-    def annassign(self, obj: ast.AnnAssign, **kwargs):
+    def annassign(self, obj: ast.AnnAssign, expected_type=None, **kwargs):
         expected_type = self.exec_type(obj.annotation, **kwargs)
-        expr, expr_type = self.exec(obj.value, **kwargs)
+        expr, expr_type = self.exec(obj.value, expected_type=expected_type, **kwargs)
 
         if not self.typecheck(obj, expr_type, expected_type):
             pass
@@ -552,11 +570,13 @@ class TypeInference:
     def exec_type(self, expr, **kwargs):
         mytype, _ = self.exec(expr, **kwargs)
 
+        # string annotation could be a c-string
         if isinstance(mytype, pyast.Str):
-            return TypeVar(mytype.s), TypeType
+            ctype = CType.from_string(mytype.s, self.typing_context)
+            return ctype, TypeType
 
         if isinstance(mytype, pyast.Name):
-            return TypeVar(mytype.id), TypeType
+            return TypeRef(mytype.id), TypeType
 
         return mytype, TypeType
 
@@ -593,6 +613,9 @@ class TypeInference:
             scope['return'] = return_type_inference
             scope['yield'] = return_type_inference
 
+            if obj.name == '__init__' and self.class_name() != '':
+                self.init_capture = True
+
             offset = 0
             args = []
 
@@ -607,13 +630,15 @@ class TypeInference:
             _, type = self.function_body(obj, **kwargs)
 
         return_type = return_type_inference.infer()
-        obj.returns = return_type
+        # obj.returns = return_type
 
-        fun_type = Callable[[], None]
-        fun_type.__args__ = args + [return_type]
-
+        fun_type = Callable(args, return_type)
         self.typing_context[obj.name] = fun_type
         self.function_scopes.pop()
+
+        if obj.name == '__init__' and self.class_name() != '':
+            self.init_capture = False
+
         return obj, fun_type
 
     def function_body(self, obj: ast.FunctionDef, **kwargs):
@@ -628,17 +653,21 @@ class TypeInference:
 
     def classdef(self, obj: ast.ClassDef, **kwargs):
         with self.typing_context as scope:
-            ref = pyast.Name(id=obj.name)
-            scope.parent[obj.name] = ref
+            # ref = Callable[[], None]
+            scope.parent[obj.name] = obj
 
             self.class_scopes.append(scope)
             self.scopes[obj] = scope
             scope.name = obj.name
-            scope['self'] = ref
+            scope['self'] = obj
 
             # need to extract the arguments of the __init__ function
             for b in obj.body:
                 self.exec(b, **kwargs)
+
+                # Update the constructor signature
+                # if isinstance(method, pyast.FunctionDef) and method.name == '__init__':
+                #    ref.__args__ = method_type.__args__
 
         self.class_scopes.pop()
         return obj, obj

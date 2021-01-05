@@ -27,7 +27,7 @@ void counter (Expression t, Expression v) {
   };
   return std::make_tuple(t, v, false);
 }
-void solve (Expression function, int value, bool show_steps) {
+Expression solve (Expression function, int value, bool show_steps) {
   " Solve trivial Expression ";
   auto f = function.copy();
   auto s = ScalarReal(value);

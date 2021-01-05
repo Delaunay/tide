@@ -1,3 +1,5 @@
+import ast
+
 reserved = {
     'return',
     'import',
@@ -65,6 +67,12 @@ builtintypes = {
 
 typing_types = {
     'List', 'Tuple', 'Dict', 'Set'
+}
+
+operator_magic = {
+    ast.Mult: '__mul__',
+    ast.Sub: '__sub__',
+    ast.Add: '__add__'
 }
 
 

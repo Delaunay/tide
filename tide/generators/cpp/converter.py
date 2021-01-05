@@ -20,6 +20,7 @@ class ProjectConverter:
 
             module = pyast.parse(code, filename=file)
 
+            typing_context = dict()
             # augment the source code with the required typing
             inferer = TypeInference(self.project, file)
             typing_context = inferer.run(module)

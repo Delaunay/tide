@@ -248,17 +248,17 @@ class CppGenerator:
             raise e
 
     def type(self, obj, **kwargs):
-        print(obj)
+        print('GEN TYPE', obj)
 
     def typevar(self, obj, **kwargs):
-        print(obj)
+        print('GEN TYPEVAR', obj)
 
     def _genericalias(self, obj, **kwargs):
-        print(obj)
+        print('GEN GENALIAS', obj)
         return
 
     def metatype(self, obj, **kwargs):
-        print(obj)
+        print('GEN METATYPE', obj)
         return
 
     def _while(self, obj: ast.While, depth, **kwargs):
@@ -666,8 +666,11 @@ class CppGenerator:
                 type = self.exec_type(arg.annotation, depth=depth, **kwargs)
 
                 if type is None:
-                    self.diagnostic(obj, f'type inference is not implemented for argument `{arg.arg}`')
-                    type = 'T'
+                    type = self.exec_type(self.typing_context.get(arg), depth=depth, **kwargs)
+
+                    if type is None:
+                        self.diagnostic(obj, f'type inference did not find a type for argument `{arg.arg}`')
+                        type = 'T'
 
                 args.append(f'{type} {arg.arg}')
 

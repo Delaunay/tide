@@ -7,7 +7,7 @@ using math = myproject::math;
 
 namespace containers::point {
 
-void add (float a, float b);
+float add (float a, float b);
 
 } // containers::point
 #include "myproject/math.h"
@@ -19,17 +19,17 @@ struct Point {
   float y;
 
   Point (float x, float y);
-  void sum ();
+  float sum ();
   ~Point ();
-  void astuple ();
-  void operator == (Point const& other) const;
-  void operator - (Point const& other) const;
-  void operator + (Point const& other) const;
-  void operator * (Point const& other) const;
-  void dot (Point const& other);
+  Tuple<float, float> astuple ();
+  bool operator == (Point const& other) const;
+  Point operator - (Point const& other) const;
+  Point operator + (Point const& other) const;
+  Point operator * (Point const& other) const;
+  float dot (Point const& other);
   void other ();
-  void dist ();
-  static void distance (Point const& a, Point const& b);
+  float dist ();
+  static float distance (Point const& a, Point const& b);
 };
 extern Point zero;
 int __main__(int argc, const char* argv[]);

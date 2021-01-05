@@ -2,44 +2,44 @@
 
 namespace containers::point {
 
-void add (float a, float b) {
+float add (float a, float b) {
   return math::add(a, b);
 }
 Point::Point (float x, float y) {
   this->x = x;
   this->y = y;
 }
-void Point::sum () {
+float Point::sum () {
   return this->x + this->y;
 }
 Point::~Point () {
   return ;
 }
-void Point::astuple () {
+Tuple<float, float> Point::astuple () {
   return std::make_tuple(this->x, this->y);
 }
-void Point::operator == (Point const& other) const {
+bool Point::operator == (Point const& other) const {
   return this->x == other.x && this->y == other.y;
 }
-void Point::operator - (Point const& other) const {
+Point Point::operator - (Point const& other) const {
   return Point(this->x - other.x, this->y - other.y);
 }
-void Point::operator + (Point const& other) const {
+Point Point::operator + (Point const& other) const {
   return Point(this->x + other.x, this->y + other.y);
 }
-void Point::operator * (Point const& other) const {
+Point Point::operator * (Point const& other) const {
   return Point(this->x * other.x, this->y * other.y);
 }
-void Point::dot (Point const& other) {
+float Point::dot (Point const& other) {
   return this->x * other.x + this->y * other.y;
 }
 void Point::other () {
 
 }
-void Point::dist () {
+float Point::dist () {
   return math::sqrt(this->dot(this));
 }
-void Point::distance (Point const& a, Point const& b) {
+float Point::distance (Point const& a, Point const& b) {
   auto v = a - b;
   return v.dist();
 }
