@@ -85,7 +85,7 @@ class Font:
     def size(self, text):
         w, h = c_int(), c_int()
         TTF_SizeUTF8(self.handle, text.encode('utf-8'), w, h)
-        return w, h
+        return w.value, h.value
 
     def glyph_width(self):
         w, _ = self.size(' ')
@@ -93,7 +93,7 @@ class Font:
 
     def glyph_height(self):
         _, h = self.size(' ')
-        return h
+        return h.value
 
 
 class Renderer:
@@ -288,8 +288,6 @@ class WindowManager:
 
 class Text:
     def __init__(self, string, color, font):
-        self.x = 0
-        self.y = 0
         self.w = 100
         self.h = 100
 
@@ -310,6 +308,9 @@ class Text:
         self.surface = self.font.render(string, self.color)
         self._string = string
         self.w, self.h = self.font.size(self._string)
+
+    def size(self):
+        return self.w, self.h
 
     def _delete_surface(self):
         if self.surface is not None:
@@ -333,12 +334,16 @@ class Text:
             self.texture = check(renderer.create_texture(self.surface))
         return self.texture
 
-    def render(self, renderer):
-        rect = SDL_Rect(self.x, self.y, self.w, self.h)
+    def render(self, pos, renderer):
+        x, y = pos
+        rect = SDL_Rect(x, y, self.w, self.h)
         renderer.copy(self._texture(renderer), None, rect)
 
 
+
 def main():
+    from tide.ide.render import TreeRender, Theme, GText, GFunctionDef
+
     with WindowManager() as manager:
         with ResourceManager() as resources:
 
@@ -346,13 +351,20 @@ def main():
 
             window = manager.new_window()
 
-            renderer = window.renderer
-            renderer.color = (123, 123, 123, 0)
+            theme = Theme(font)
 
-            txt = Text("ABC", color=(0, 0, 0), font=font)
+            renderer = window.renderer
 
             renderer.clear()
+            txt = GFunctionDef('hello', theme=theme)
+            print(txt.pos(True), txt.pos(False))
+            print(txt.size())
             txt.render(renderer)
+            # r = TreeRender(renderer, (0, 0), theme)
+            # renderer.color = (123, 123, 123, 0)
+            # txt = Text("ABC", color=(0, 0, 0), font=font)
+            #
+            # txt.render(renderer)
             renderer.present()
 
             manager.run()
@@ -362,3 +374,5 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+    pass
+
