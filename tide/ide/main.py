@@ -93,7 +93,7 @@ class Font:
 
     def glyph_height(self):
         _, h = self.size(' ')
-        return h.value
+        return h
 
 
 class Renderer:
@@ -340,8 +340,7 @@ class Text:
         renderer.copy(self._texture(renderer), None, rect)
 
 
-
-def main():
+def main(module):
     from tide.ide.render import TreeRender, Theme, GText, GFunctionDef
 
     with WindowManager() as manager:
@@ -356,7 +355,10 @@ def main():
             renderer = window.renderer
 
             renderer.clear()
-            txt = GFunctionDef('hello', theme=theme)
+
+            fun = module.body[-1]
+
+            txt = GFunctionDef(fun, theme=theme)
             print(txt.pos(True), txt.pos(False))
             print(txt.size())
             txt.render(renderer)
@@ -373,6 +375,17 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    import ast
+
+    module: ast.Module = ast.parse("""
+from dataclasses import dataclass
+import time
+
+def add(a: int, b: int = 0, *arg, d=2, c=1, **kwargs) -> int:
+    return a + b
+
+""")
+
+    sys.exit(main(module))
     pass
 

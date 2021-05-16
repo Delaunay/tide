@@ -9,13 +9,14 @@ class Theme:
         self.font = font
         white = (255, 255, 255)
         black = (0, 0, 0)
-
+        self.space_count = 4
         self.colors = {
             'keyword': (0, 125, 0, 0),
             'paren': (125, 0, 0, 0),
             'bracket': (125, 0, 0, 0),
             'default': (125, 0, 0, 0),
             'background': white,
+            'function': black,
             'arg_name': black,
             'arg_type': black,
             'arg_value':black,
@@ -32,6 +33,9 @@ class Theme:
 
     def normal(self, str):
         return self.text(str, 'default')
+
+    def indent_size(self):
+        return self.font.glyph_width() * self.space_count
 
 
 class GNode:
@@ -53,6 +57,10 @@ class GNode:
 
     def render(self, renderer):
         raise NotImplementedError()
+
+    @staticmethod
+    def from_ast(node):
+        pass
 
 
 class GText(GNode):
@@ -98,6 +106,14 @@ class GComposedNode(GNode):
         self.cursor = x + w, y
         self.w = max(self.w, self.cursor[0])
 
+    def indent(self):
+        x, y = self.cursor
+        self.cursor = x + self.theme.indent_size(), y
+
+    def deindent(self):
+        x, y = self.cursor
+        self.cursor = x - self.theme.indent_size(), y
+
     def newline(self):
         px, py = self.pos()
         x, y = self.cursor
@@ -110,14 +126,27 @@ class GComposedNode(GNode):
             n.render(renderer)
 
 
+class GName(GText):
+    def __init__(self, node: Name, type='default', parent=None, theme=None):
+        super(GName, self).__init__(node.id, type=type, parent=parent, theme=theme)
+
+
 class GFunctionDef(GComposedNode):
     def __init__(self, node: FunctionDef, parent=None, theme=None):
         super(GFunctionDef, self).__init__(parent, theme)
         self.text('def ', 'keyword')
-        self.text(node)
+        self.text(node.name, 'function')
         self.text('(', 'paren')
 
         self.text(')', 'paren')
+        self.text(' -> ')
+        self.text(node.returns.id, 'arg_type')
+        self.text(':')
+        self.newline()
+        self.indent()
+        self.text('pass', 'keyword')
+
+
 
         # self.nodes = [
         #     self.text('def', 'keyword'),
