@@ -1,7 +1,5 @@
-from tide.generators.visitor import NodeVisitor
 from tide.generators.nodes import *
-
-from tide.ide.main import Text
+from tide.ide.sdl import Text, DrawColor, SDL_Rect
 
 
 class Theme:
@@ -20,7 +18,7 @@ class Theme:
             'function': black,
             'arg_name': black,
             'arg_type': black,
-            'arg_value':black,
+            'arg_value': black,
             'colon': black,
             'equal_assign': black,
             'arrow': black,
@@ -53,6 +51,9 @@ class GNode:
         xx, yy = self.parent.pos(False)
         return x + xx, y + yy
 
+    def __repr__(self):
+        return f'<GNode>'
+
     def size(self):
         raise NotImplementedError()
 
@@ -60,13 +61,13 @@ class GNode:
         raise NotImplementedError()
 
     def from_ast(self, node):
-        return GNode._from_ast(node, parent=self.parent, theme=self.theme)
+        return GNode.new_from_ast(node, parent=self.parent, theme=self.theme)
 
     def collision(self, x, y, recurse=True):
         raise NotImplementedError
 
     @staticmethod
-    def _from_ast(node, parent=None, theme=None):
+    def new_from_ast(node, parent=None, theme=None):
         name = node.__class__.__name__
 
         ctor = DISPATCH.get(name)
@@ -89,6 +90,9 @@ class GText(GNode):
             val = self.theme.text(str, type)
             GText.CACHE[(str, type)] = val
         return val
+
+    def __repr__(self):
+        return f'<GText text={self.text.string}>'
 
     def string(self):
         return self.text.string
@@ -114,6 +118,9 @@ class GName(GText):
         super(GName, self).__init__(node.id, type=type, parent=parent, theme=theme)
         self.node = node
 
+    def __repr__(self):
+        return f'<GName text={self.text.string}>'
+
 
 class GConstant(GText):
     def __init__(self, value: Constant, parent=None, theme=None):
@@ -121,6 +128,9 @@ class GConstant(GText):
         value_type = 'constant'
         self.node = value
         super(GConstant, self).__init__(value_str, type=value_type, parent=parent, theme=theme)
+
+    def __repr__(self):
+        return f'<GConstant text={self.text.string}>'
 
 
 class GComposedNode(GNode):
@@ -167,9 +177,6 @@ class GComposedNode(GNode):
         self.h = max(self.h, self.cursor[1])
 
     def render(self, renderer):
-        from sdl2 import SDL_Rect
-        from tide.ide.main import DrawColor
-
         x, y = self.pos(False)
         w, h = self.size()
 
@@ -205,12 +212,19 @@ class GComposedNode(GNode):
         # Should never happen
         return None
 
+    def __repr__(self):
+        return f'<GComposed>'
+
 
 class GReturn(GComposedNode):
     def __init__(self, node: Return, parent=None, theme=None):
         super(GReturn, self).__init__(parent, theme)
         self.text('return ', 'keyword')
         self.append(self.from_ast(node.value))
+        self.node =node
+
+    def __repr__(self):
+        return f'<GReturn>'
 
 
 class GFunctionDef(GComposedNode):
