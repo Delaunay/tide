@@ -45,6 +45,8 @@ class Font:
         self.handle = handle
         self._w = None
         self._h = None
+        self.hint = TTF_HINTING_MONO
+        # self.kerning = 0
 
     def destroy(self):
         if self.handle is not None:
@@ -76,9 +78,21 @@ class Font:
     def hint(self):
         return TTF_GetFontHinting(self.handle)
 
+    @hint.setter
+    def hint(self, value):
+        TTF_SetFontHinting(self.handle, value)
+
     @property
     def kerning(self):
         return TTF_GetFontKerning(self.handle)
+
+    @property
+    def lineskip(self):
+        return TTF_FontLineSkip(self.handle)
+
+    @kerning.setter
+    def kerning(self, value):
+        TTF_SetFontKerning(self.handle, value)
 
     def render(self, text, color):
         surface = TTF_RenderUTF8_Blended(self.handle, text.encode('utf-8'), color)
@@ -87,7 +101,8 @@ class Font:
     def size(self, text):
         w, h = c_int(), c_int()
         TTF_SizeUTF8(self.handle, text.encode('utf-8'), w, h)
-        return w.value, h.value
+
+        return w.value, self.lineskip
 
     def glyph_width(self):
         if not self._w:

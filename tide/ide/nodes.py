@@ -1,5 +1,5 @@
 from tide.generators.nodes import *
-from tide.ide.sdl import Text, DrawColor, SDL_Rect
+from tide.ide.sdl import Text, DrawColor, SDL_Rect, SDL_HasIntersection
 
 
 class Theme:
@@ -8,6 +8,7 @@ class Theme:
         white = (255, 255, 255)
         black = (0, 0, 0)
         self.space_count = 4
+        self.select_color = (0, 0, 125, 68)
         self.colors = {
             'keyword': (0, 125, 0, 0),
             'paren': (125, 0, 0, 0),
@@ -66,6 +67,18 @@ class GNode:
     def collision(self, x, y, recurse=True):
         raise NotImplementedError
 
+    @property
+    def rect(self):
+        return SDL_Rect(*self.pos(False), *self.size())
+
+    def overlap(self, rect, select=None):
+        intersect = SDL_HasIntersection(self.rect, rect)
+
+        if select is not None and intersect == 1:
+            select.add(self)
+
+        return intersect
+
     @staticmethod
     def new_from_ast(node, parent=None, theme=None):
         name = node.__class__.__name__
@@ -83,6 +96,22 @@ class GText(GNode):
     def __init__(self, str, type='default', parent=None, theme=None):
         super(GText, self).__init__(parent=parent, theme=theme)
         self.text: Text = self._new_string(str, type)
+
+    def __len__(self):
+        return len(self.string())
+
+    def charoffset(self, x, y):
+        w = self.theme.font.glyph_width()
+        xx, _ = self.pos(False)
+        x = x - xx
+        return x // w
+
+    def char(self, x, y):
+        n = self.charoffset(x, y)
+        s = self.string()
+        if n < len(s):
+            return s[n]
+        return None
 
     def _new_string(self, str, type):
         val = GText.CACHE.get((str, type))
@@ -139,7 +168,7 @@ class GComposedNode(GNode):
         self.nodes = []
         self.cursor = (0, 0)
         self.w = 0
-        self.h = self.theme.font.glyph_height()
+        self.h = self.theme.font.lineskip
         self.background_color = (0x7D, 0x7D, 0x7D, 0x3F)
 
     def size(self):
@@ -172,7 +201,7 @@ class GComposedNode(GNode):
     def newline(self):
         px, py = self.pos()
         x, y = self.cursor
-        self.cursor = px, y + self.theme.font.glyph_height()
+        self.cursor = px, y + self.theme.font.lineskip
         self.w = max(self.w, self.cursor[0])
         self.h = max(self.h, self.cursor[1])
 
@@ -180,12 +209,12 @@ class GComposedNode(GNode):
         x, y = self.pos(False)
         w, h = self.size()
 
+        for n in self.nodes:
+            n.render(renderer)
+
         with DrawColor(renderer, self.background_color):
             rect = SDL_Rect(x - 1, y - 1, w + 1, h + 1)
             renderer.fillrect(rect)
-
-        for n in self.nodes:
-            n.render(renderer)
 
     def is_contained(self, tx, ty):
         x, y = self.pos(False)
@@ -212,6 +241,12 @@ class GComposedNode(GNode):
         # Should never happen
         return None
 
+    def overlap(self, rect, select=False):
+        for n in self.nodes:
+            n.overlap(rect, select)
+
+        return False
+
     def __repr__(self):
         return f'<GComposed>'
 
@@ -221,7 +256,7 @@ class GReturn(GComposedNode):
         super(GReturn, self).__init__(parent, theme)
         self.text('return ', 'keyword')
         self.append(self.from_ast(node.value))
-        self.node =node
+        self.node = node
 
     def __repr__(self):
         return f'<GReturn>'
@@ -236,7 +271,7 @@ class GFunctionDef(GComposedNode):
         self.text('(', 'paren')
         self.args(node.args)
         self.text(')', 'paren')
-        self.text(' -> ')
+        self.text(' → ')
         self.append(self.from_ast(node.returns))
         self.text(':')
         self.newline()
