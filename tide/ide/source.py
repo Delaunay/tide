@@ -2,13 +2,37 @@ from tide.ide.sdl import Window, DrawColor, SDL_Rect, SDL_Event
 from tide.ide.sdl import SDL_WindowEvent, SDL_WINDOWEVENT, SDL_WINDOWEVENT_RESIZED
 from tide.ide.sdl import SDL_MouseButtonEvent, SDL_MOUSEBUTTONUP, SDL_MOUSEBUTTONDOWN, SDL_PRESSED, SDL_RELEASED
 from tide.ide.sdl import SDL_MouseMotionEvent, SDL_MOUSEMOTION
-from tide.ide.nodes import GNode
+from tide.ide.sdl import SDL_KeyboardEvent, SDL_KEYDOWN, SDL_KEYUP, SDL_GetKeyName
+from tide.ide.nodes import GNode, GText
+
+
+class TextEdit:
+    def __init__(self, node: GText, offset):
+        self.node = node
+        self.i = offset
+        self.string = [s for s in node.string]
+
+    def key_event(self, kevent: SDL_KeyboardEvent):
+        if kevent.state == SDL_PRESSED:
+            return False
+
+        keysym = kevent.keysym
+        key = keysym.sym
+        mod = keysym.mod
+
+        c = SDL_GetKeyName(key)
+        self.string.insert(self.i, c.decode())
+        new = ''.join(self.string)
+        self.node.string = new
+        print(self.node.string, new)
+        # self.node._new_string(new, self.node.type)
+        return True
 
 
 class Tide(Window):
     def __init__(self, handle):
         super(Tide, self).__init__(handle)
-        self.module = None
+        self._module = None
         self.theme = None
         self.redraw = True
         self.root = None
@@ -19,6 +43,17 @@ class Tide(Window):
         self.mouse_start = None
         self.mouse_end = None
         self.highlight_obj = set()
+        self.editor = None
+
+    @property
+    def module(self):
+        return self._module
+
+    @module.setter
+    def module(self, mod):
+        self._module = mod
+        fun = self._module.body[-1]
+        self.root = GNode.new_from_ast(fun, theme=self.theme)
 
     @property
     def mouse_rect(self):
@@ -46,6 +81,11 @@ class Tide(Window):
     def handle_mouse_button_event(self, mbevent: SDL_MouseButtonEvent):
         x, y = mbevent.x, mbevent.y
         self.selected = self.root.collision(x, y)
+
+        if self.selected:
+            self.editor = TextEdit(self.selected, self.selected.charoffset(x, y))
+        else:
+            self.editor = None
 
         self.click = (x, y)
         self.cursor = (x, y)
@@ -77,7 +117,15 @@ class Tide(Window):
         if event.type == SDL_MOUSEMOTION:
             self.handle_mouse_motion_event(event.motion)
 
+        if event.type in (SDL_KEYDOWN, SDL_KEYUP) and self.editor:
+            self.redraw = self.editor.key_event(event.key)
+
+        # SDL_MOUSEWHEEL
+
+        # SDL_TEXTEDITING/SDL_TEXTINPUT
+
         if self.redraw:
+            print('redraw')
             self.render()
             self.redraw = False
 
@@ -118,9 +166,6 @@ class Tide(Window):
                 renderer.fillrect(self.mouse_rect)
 
     def draw(self, renderer):
-        fun = self.module.body[-1]
-        self.root = GNode.new_from_ast(fun, theme=self.theme)
-
         self.root.position = (0, 0)
         self.root.render(renderer)
 

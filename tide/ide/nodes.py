@@ -95,10 +95,11 @@ class GText(GNode):
 
     def __init__(self, str, type='default', parent=None, theme=None):
         super(GText, self).__init__(parent=parent, theme=theme)
+        self.type = type
         self.text: Text = self._new_string(str, type)
 
     def __len__(self):
-        return len(self.string())
+        return len(self.string)
 
     def charoffset(self, x, y):
         w = self.theme.font.glyph_width()
@@ -108,23 +109,29 @@ class GText(GNode):
 
     def char(self, x, y):
         n = self.charoffset(x, y)
-        s = self.string()
+        s = self.string
         if n < len(s):
             return s[n]
         return None
 
-    def _new_string(self, str, type):
+    @property
+    def string(self):
+        return self.text.string
+
+    @string.setter
+    def string(self, value):
+        self.text = self._new_string(value, self.type)
+
+    def _new_string(self, str, type) -> Text:
         val = GText.CACHE.get((str, type))
         if val is None:
             val = self.theme.text(str, type)
             GText.CACHE[(str, type)] = val
+
         return val
 
     def __repr__(self):
         return f'<GText text={self.text.string}>'
-
-    def string(self):
-        return self.text.string
 
     def size(self):
         return self.text.size()
