@@ -43,6 +43,8 @@ def check(val=None):
 class Font:
     def __init__(self, handle):
         self.handle = handle
+        self._w = None
+        self._h = None
 
     def destroy(self):
         if self.handle is not None:
@@ -88,17 +90,22 @@ class Font:
         return w.value, h.value
 
     def glyph_width(self):
-        w, _ = self.size(' ')
-        return w
+        if not self._w:
+            self._w, self._h = self.size(' ')
+
+        return self._w
 
     def glyph_height(self):
-        _, h = self.size(' ')
-        return h
+        if not self._h:
+            self._w, self._h = self.size(' ')
+
+        return self._h
 
 
 class Renderer:
     def __init__(self, handle):
-        self.handle = handle
+        self.handle: POINTER(SDL_Renderer) = handle
+        self.blendmode(SDL_BLENDMODE_BLEND)
 
     def __del__(self):
         self.destroy()
@@ -116,7 +123,7 @@ class Renderer:
 
     @color.setter
     def color(self, colour):
-        SDL_SetRenderDrawColor(self.handle, *colour)
+        check(SDL_SetRenderDrawColor(self.handle, *colour))
 
     def clear(self, colour: Tuple[int, int, int, int] = (0xFF, 0xFF, 0xFF, 0xFF)):
         with DrawColor(self, colour):
@@ -133,6 +140,12 @@ class Renderer:
 
     def drawrect(self, rectangle: Optional[SDL_Rect]):
         check(SDL_RenderDrawRect(self.handle, rectangle))
+
+    def blendmode(self, mode=SDL_BLENDMODE_BLEND):
+        check(SDL_SetRenderDrawBlendMode(self.handle, mode))
+
+    def fillrect(self, rectangle: Optional[SDL_Rect]):
+        check(SDL_RenderFillRect(self.handle, rectangle))
 
     def present(self):
         # __main__.SDLError: Surface doesn't have a colorkey
@@ -341,7 +354,7 @@ class Text:
 
 
 def main(module):
-    from tide.ide.render import TreeRender, Theme, GText, GFunctionDef
+    from tide.ide.render import Theme, GText, GFunctionDef
 
     with WindowManager() as manager:
         with ResourceManager() as resources:
@@ -361,14 +374,21 @@ def main(module):
             txt = GFunctionDef(fun, theme=theme)
             print(txt.pos(True), txt.pos(False))
             print(txt.size())
+            txt.position = (50, 50)
             txt.render(renderer)
+
+            pos = (150, 80)
+            with DrawColor(renderer, (0xFF, 0x00, 0x00, 0xFF)):
+                renderer.fillrect(SDL_Rect(*pos, 5, 5))
+
+            print(txt.collision(*pos, True))
+
             # r = TreeRender(renderer, (0, 0), theme)
             # renderer.color = (123, 123, 123, 0)
             # txt = Text("ABC", color=(0, 0, 0), font=font)
             #
             # txt.render(renderer)
             renderer.present()
-
             manager.run()
 
     return 0
