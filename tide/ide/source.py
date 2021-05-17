@@ -1,3 +1,5 @@
+import time
+
 from tide.ide.sdl import Window, DrawColor, SDL_Rect, SDL_Event
 from tide.ide.sdl import SDL_WindowEvent, SDL_WINDOWEVENT, SDL_WINDOWEVENT_RESIZED
 from tide.ide.sdl import SDL_MouseButtonEvent, SDL_MOUSEBUTTONUP, SDL_MOUSEBUTTONDOWN, SDL_PRESSED, SDL_RELEASED
@@ -34,6 +36,7 @@ class TextEdit:
 
         if keysym.sym == SDLK_BACKSPACE and self.i > 0:
             self.remove()
+            return True
 
         if not (0 <= keysym.sym <= 0x10ffff):
             return False
@@ -65,6 +68,7 @@ class Tide(Window):
         self.mouse_end = None
         self.highlight_obj = set()
         self.editor = None
+        self.last_redraw = 0
 
     @property
     def module(self):
@@ -127,6 +131,7 @@ class Tide(Window):
 
     def handle_mouse_motion_event(self, mmevent: SDL_MouseMotionEvent):
         self.mouse_end = mmevent.x, mmevent.y
+        self.redraw = True
 
     def handle_event(self, event: SDL_Event):
         if event.type == SDL_WINDOWEVENT:
@@ -145,9 +150,9 @@ class Tide(Window):
 
         # SDL_TEXTEDITING/SDL_TEXTINPUT
 
-        if self.redraw:
-            print('redraw')
+        if self.redraw and time.time() - self.last_redraw > 0.01:
             self.render()
+            self.last_redraw = time.time()
             self.redraw = False
 
     def highlights(self, renderer):
@@ -177,17 +182,17 @@ class Tide(Window):
             h = self.theme.font.lineskip
             w = self.theme.font.glyph_width()
 
-            x = (x // w) * w
-            y = (y // h) * h
+            x = ((x - self.root.position[0]) // w) * w + self.root.position[0]
+            y = ((y - self.root.position[1]) // h) * h + self.root.position[1]
             renderer.fillrect(SDL_Rect(x, y + 2, 1, h - 4))
 
     def draw_selection(self, renderer):
         if self.mouse_start and self.mouse_end:
-            with DrawColor(renderer, (0x00, 0xF8, 0x00, 0x68)):
+            with DrawColor(renderer, self.theme.select_color):
                 renderer.fillrect(self.mouse_rect)
 
     def draw(self, renderer):
-        self.root.position = (0, 0)
+        self.root.position = (50, 50)
         self.root.render(renderer)
 
         if self.click:
@@ -195,3 +200,15 @@ class Tide(Window):
 
         if self.cursor:
             self.draw_cursor(renderer)
+
+#         str = """
+#
+#
+#
+# from dataclasses import dataclass
+# import time
+#
+# def add(a: int, /, b: int=3, *arg, c=2, d=1, **kwargs) -> int:
+#     return a + b
+# """
+#         # GText(str, theme=self.theme).render(renderer)

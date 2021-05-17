@@ -96,6 +96,10 @@ class Font:
 
     def render(self, text, color):
         surface = TTF_RenderUTF8_Blended(self.handle, text.encode('utf-8'), color)
+        # surface = TTF_RenderUTF8_Blended_Wrapped(self.handle, text.encode('utf-8'), color, 8000)
+
+        # surface = TTF_RenderUNICODE_Blended(self.handle, text.encode('utf-8'), color)
+        # surface = TTF_RenderText_Blended(self.handle, text.encode('utf-8'), color)
         return surface
 
     def size(self, text):
