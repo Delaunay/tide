@@ -2,7 +2,7 @@ from tide.ide.sdl import Window, DrawColor, SDL_Rect, SDL_Event
 from tide.ide.sdl import SDL_WindowEvent, SDL_WINDOWEVENT, SDL_WINDOWEVENT_RESIZED
 from tide.ide.sdl import SDL_MouseButtonEvent, SDL_MOUSEBUTTONUP, SDL_MOUSEBUTTONDOWN, SDL_PRESSED, SDL_RELEASED
 from tide.ide.sdl import SDL_MouseMotionEvent, SDL_MOUSEMOTION
-from tide.ide.sdl import SDL_KeyboardEvent, SDL_KEYDOWN, SDL_KEYUP, SDL_GetKeyName
+from tide.ide.sdl import SDL_KeyboardEvent, SDL_KEYDOWN, SDL_KEYUP, KMOD_SHIFT, KMOD_CAPS, SDLK_BACKSPACE
 from tide.ide.nodes import GNode, GText
 
 
@@ -12,20 +12,41 @@ class TextEdit:
         self.i = offset
         self.string = [s for s in node.string]
 
+    def update(self):
+        new = ''.join(self.string)
+        self.node.string = new
+
+    def insert(self, c):
+        self.string.insert(self.i, c)
+        self.update()
+        self.i += 1
+
+    def remove(self):
+        self.string.pop(self.i - 1)
+        self.update()
+        self.i -= 1
+
     def key_event(self, kevent: SDL_KeyboardEvent):
         if kevent.state == SDL_PRESSED:
             return False
 
         keysym = kevent.keysym
-        key = keysym.sym
+
+        if keysym.sym == SDLK_BACKSPACE and self.i > 0:
+            self.remove()
+
+        if not (0 <= keysym.sym <= 0x10ffff):
+            return False
+
+        key = chr(keysym.sym).lower()
         mod = keysym.mod
 
-        c = SDL_GetKeyName(key)
-        self.string.insert(self.i, c.decode())
-        new = ''.join(self.string)
-        self.node.string = new
-        print(self.node.string, new)
-        # self.node._new_string(new, self.node.type)
+        if key.isalnum():
+            if mod & KMOD_SHIFT | mod & KMOD_CAPS:
+                key = key.upper()
+
+            self.insert(key)
+
         return True
 
 
