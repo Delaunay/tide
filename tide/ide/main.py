@@ -12,6 +12,10 @@ def main(module):
             window.theme = Theme(font)
             window.module = module
 
+            window = manager.new_window(Tide)
+            window.theme = Theme(font)
+            window.module = module
+
             manager.run()
 
     return 0

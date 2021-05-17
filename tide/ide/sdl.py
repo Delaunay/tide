@@ -334,7 +334,9 @@ class Text:
         self.font = font
 
         self.surface = None
-        self.texture = None
+        # Texture are created by renderer
+        # it is a rendering specific data, caching the surface might enough
+        self.texture = dict()
         self.string = string
 
     @property
@@ -357,9 +359,9 @@ class Text:
             self.surface = None
 
     def _delete_texture(self):
-        if self.texture is not None:
-            SDL_DestroyTexture(self.texture)
-            self.texture = None
+        for _, t in self.texture.items():
+            SDL_DestroyTexture(t)
+        self.texture = dict()
 
     def destroy(self):
         self._delete_surface()
@@ -369,9 +371,13 @@ class Text:
         self.destroy()
 
     def _texture(self, renderer):
-        if self.texture is None:
-            self.texture = check(renderer.create_texture(self.surface))
-        return self.texture
+        txt = self.texture.get(id(renderer))
+
+        if txt is None:
+            txt = check(renderer.create_texture(self.surface))
+            self.texture[id(renderer)] = txt
+
+        return txt
 
     def render(self, pos, renderer):
         x, y = pos
