@@ -1,11 +1,14 @@
+import math
 import time
+from typing import List
 
 from tide.ide.sdl import Window, DrawColor, SDL_Rect, SDL_Event
 from tide.ide.sdl import SDL_WindowEvent, SDL_WINDOWEVENT, SDL_WINDOWEVENT_RESIZED
 from tide.ide.sdl import SDL_MouseButtonEvent, SDL_MOUSEBUTTONUP, SDL_MOUSEBUTTONDOWN, SDL_PRESSED, SDL_RELEASED
 from tide.ide.sdl import SDL_MouseMotionEvent, SDL_MOUSEMOTION
 from tide.ide.sdl import SDL_KeyboardEvent, SDL_KEYDOWN, SDL_KEYUP, KMOD_SHIFT, KMOD_CAPS, SDLK_BACKSPACE
-from tide.ide.nodes import GNode, GText
+from tide.ide.nodes import GNode, GText, GNewline, GIndent, GDeindent
+from tide.ide.speedup import select_line
 
 
 class TextEdit:
@@ -69,6 +72,7 @@ class Tide(Window):
         self.highlight_obj = set()
         self.editor = None
         self.last_redraw = 0
+        self.entities: List[GNode] = []
 
     @property
     def module(self):
@@ -79,6 +83,10 @@ class Tide(Window):
         self._module = mod
         fun = self._module.body[-1]
         self.root = GNode.new_from_ast(fun, theme=self.theme)
+        self.root.track(self.entities)
+
+        for n in self.entities:
+            print(type(n))
 
     @property
     def mouse_rect(self):
@@ -121,7 +129,8 @@ class Tide(Window):
             self.mouse_start = (x, y)
 
         if mbevent.state == SDL_RELEASED:
-            self.root.overlap(self.mouse_rect, select=self.highlight_obj)
+            #
+            self.select_line()
             self.redraw = True
             self.mouse_end = None
             self.mouse_start = None
@@ -150,14 +159,16 @@ class Tide(Window):
 
         # SDL_TEXTEDITING/SDL_TEXTINPUT
 
-        if self.redraw and time.time() - self.last_redraw > 0.01:
+        # limit the FPS to ~30 so we do not overload the cpu on event
+        # we do not see since rendering is costly (full ast traversal)
+        if self.redraw and time.time() - self.last_redraw > 0.03:
             self.render()
             self.last_redraw = time.time()
             self.redraw = False
 
     def highlights(self, renderer):
         for n in self.highlight_obj:
-            x, y = n.pos(False)
+            x, y = n.pos(True)
             w, h = n.size()
 
             with DrawColor(renderer, self.theme.select_color):
@@ -191,9 +202,70 @@ class Tide(Window):
             with DrawColor(renderer, self.theme.select_color):
                 renderer.fillrect(self.mouse_rect)
 
+    def select_2d(self):
+        """Does a 2D intersection select"""
+        self.root.overlap(self.mouse_rect, select=self.highlight_obj)
+
+    def select_line(self):
+        """Does a text line select"""
+        fh = self.theme.font.lineskip
+        fw = self.theme.font.glyph_width()
+
+        x, y = self.root.position
+        result = select_line(self.entities, self.mouse_rect, fh, fw, x, y)
+
+        self.highlight_obj = result
+
+    def draw_module(self, renderer):
+        cursor = self.root.position
+
+        print('s')
+        for n in self.entities:
+            s = ''
+            if hasattr(n, 'string'):
+                s = n.string
+
+            if isinstance(n, GNewline):
+                x = 0
+                _, y = cursor
+                if n.parent:
+                    x, _ = n.parent.position
+                cursor = x + self.root.position[1], y + self.theme.font.lineskip
+                continue
+
+            if isinstance(n, GIndent):
+                x, y = cursor
+                cursor = x + self.theme.indent_size(), y
+                continue
+
+            if isinstance(n, GDeindent):
+                x, y = cursor
+                cursor = x - self.theme.indent_size(), y
+                continue
+
+            x, y = cursor
+            n.position = x, y
+            w, h = n.size()
+
+            ws = self.theme.font.glyph_width()
+            print(f'{type(n).__name__:>15} n={w / ws} p=({x:3d} x {y:3d}) s=({w:3d} x {h:3d}) - {s}')
+
+            self.show_bounds(renderer, x, y, w, h)
+            n.render(renderer)
+            cursor = x + w, y
+        print('done')
+
+    def show_bounds(self, renderer, x, y, w, h):
+        with DrawColor(renderer, (0x00, 0xFF, 0x00, 0xFF)):
+            renderer.fillrect(SDL_Rect(x, y + h, w - 5, 2))
+
+        with DrawColor(renderer, (0xFF, 0x00, 0xFF, 0xFF)):
+            renderer.fillrect(SDL_Rect(x + w - 5, y + h, 5, 2))
+
     def draw(self, renderer):
         self.root.position = (50, 50)
-        self.root.render(renderer)
+        # self.root.render(renderer)
+        self.draw_module(renderer)
 
         if self.click:
             self.draw_click(renderer)

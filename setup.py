@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 from setuptools import setup
+from Cython.Build import cythonize
 
 
 if __name__ == '__main__':
@@ -22,6 +23,7 @@ if __name__ == '__main__':
             'tide.ide',
             'tide.generators',
         ],
+        ext_modules=cythonize("tide/ide/*.pyx",  compiler_directives={'language_level': "3"}),
         setup_requires=['setuptools'],
         install_require=['PySDL2'],
         tests_require=['pytest', 'flake8', 'codecov', 'pytest-cov'],

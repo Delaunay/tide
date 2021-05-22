@@ -1,3 +1,5 @@
+import copy
+
 from tide.generators.nodes import *
 from tide.ide.sdl import Text, DrawColor, SDL_Rect, SDL_HasIntersection
 
@@ -43,6 +45,11 @@ class GNode:
         self.theme = theme
         self.position = (0, 0)
         self.parent = parent
+        self.selected = False
+
+    def copy_selected(self):
+        """Copy the selected AST node creating a new AST node"""
+        raise NotImplementedError()
 
     def pos(self, relative=True):
         if relative or self.parent is None:
@@ -88,6 +95,9 @@ class GNode:
             return ctor(node, parent=parent, theme=theme)
 
         print(name)
+
+    def track(self, entities):
+        entities.append(self)
 
 
 class GText(GNode):
@@ -137,7 +147,8 @@ class GText(GNode):
         return self.text.size()
 
     def render(self, renderer):
-        self.text.render(self.pos(False), renderer)
+        # print(self.pos(False), self.size())
+        self.text.render(self.pos(True), renderer)
 
     def collision(self, tx, ty, recurse=True):
         x, y = self.pos(False)
@@ -149,24 +160,60 @@ class GText(GNode):
         return None
 
 
-class GName(GText):
-    def __init__(self, node: Name, type='default', parent=None, theme=None):
-        super(GName, self).__init__(node.id, type=type, parent=parent, theme=theme)
+class GASTLeaf(GText):
+    def __init__(self, node: Node, str, type='default', parent=None, theme=None):
+        super(GASTLeaf, self).__init__(str, type, parent, theme)
         self.node = node
+
+    def copy_selected(self):
+        if self.selected:
+            return copy.deepcopy(self.node)
+
+        return None
+
+
+class GName(GASTLeaf):
+    def __init__(self, node: Name, type='default', parent=None, theme=None):
+        super(GName, self).__init__(node, node.id, type=type, parent=parent, theme=theme)
 
     def __repr__(self):
         return f'<GName text={self.text.string}>'
 
 
-class GConstant(GText):
+class GConstant(GASTLeaf):
     def __init__(self, value: Constant, parent=None, theme=None):
         value_str = f'{value.value}'
         value_type = 'constant'
-        self.node = value
-        super(GConstant, self).__init__(value_str, type=value_type, parent=parent, theme=theme)
+        super(GConstant, self).__init__(value, value_str, type=value_type, parent=parent, theme=theme)
 
     def __repr__(self):
         return f'<GConstant text={self.text.string}>'
+
+
+class GInvisible(GNode):
+    def __init__(self, parent=None, theme=None):
+        super(GInvisible, self).__init__(parent, theme)
+
+    def size(self):
+        return 0, 0
+
+    def render(self, renderer):
+        pass
+
+    def collision(self, x, y, recurse=True):
+        return None
+
+
+class GNewline(GInvisible):
+    pass
+
+
+class GIndent(GInvisible):
+    pass
+
+
+class GDeindent(GInvisible):
+    pass
 
 
 class GComposedNode(GNode):
@@ -200,14 +247,17 @@ class GComposedNode(GNode):
     def indent(self):
         x, y = self.cursor
         self.cursor = x + self.theme.indent_size(), y
+        self.nodes.append(GIndent())
 
     def deindent(self):
         x, y = self.cursor
         self.cursor = x - self.theme.indent_size(), y
+        self.nodes.append(GDeindent())
 
     def newline(self):
         px, py = self.pos()
         x, y = self.cursor
+        self.nodes.append(GNewline())
         self.cursor = px, y + self.theme.font.lineskip
         self.w = max(self.w, self.cursor[0])
         self.h = max(self.h, self.cursor[1])
@@ -248,7 +298,7 @@ class GComposedNode(GNode):
         # Should never happen
         return None
 
-    def overlap(self, rect, select=False):
+    def overlap(self, rect, select=None):
         for n in self.nodes:
             n.overlap(rect, select)
 
@@ -256,6 +306,10 @@ class GComposedNode(GNode):
 
     def __repr__(self):
         return f'<GComposed>'
+
+    def track(self, entities):
+        for n in self.nodes:
+            n.track(entities)
 
 
 class GReturn(GComposedNode):
@@ -269,24 +323,11 @@ class GReturn(GComposedNode):
         return f'<GReturn>'
 
 
-class GFunctionDef(GComposedNode):
-    def __init__(self, node: FunctionDef, parent=None, theme=None):
-        super(GFunctionDef, self).__init__(parent, theme)
+class GArgument(GComposedNode):
+    def __init__(self, node: Arguments, parent=None, theme=None):
+        super(GArgument, self).__init__(parent, theme)
         self.node = node
-        self.text('def ', 'keyword')
-        self.text(node.name, 'function')
-        self.text('(', 'paren')
-        self.args(node.args)
-        self.text(')', 'paren')
-        self.text(' → ')
-        self.append(self.from_ast(node.returns))
-        self.text(':')
-        self.newline()
-        self.indent()
-        for expr in node.body:
-            self.append(self.from_ast(expr))
-            self.newline()
-        self.deindent()
+        self.args(node)
 
     def generate_defaults(self, kwonlyargs, kw_defaults):
         defaults = [None for _ in kwonlyargs]
@@ -347,6 +388,26 @@ class GFunctionDef(GComposedNode):
 
             self.text('**')
             self.text(args.kwarg.arg)
+
+
+class GFunctionDef(GComposedNode):
+    def __init__(self, node: FunctionDef, parent=None, theme=None):
+        super(GFunctionDef, self).__init__(parent, theme)
+        self.node = node
+        self.text('def ', 'keyword')
+        self.text(node.name, 'function')
+        self.text('(', 'paren')
+        self.append(GArgument(node.args, parent, theme))
+        self.text(')', 'paren')
+        self.text(' → ')
+        self.append(self.from_ast(node.returns))
+        self.text(':')
+        self.newline()
+        self.indent()
+        for expr in node.body:
+            self.append(self.from_ast(expr))
+            self.newline()
+        self.deindent()
 
 
 class GBinOp(GComposedNode):

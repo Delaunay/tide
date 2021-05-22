@@ -1,3 +1,6 @@
+import pyximport
+pyximport.install()
+
 from tide.ide.sdl import WindowManager, ResourceManager
 from tide.ide.nodes import Theme
 from tide.ide.source import Tide
@@ -6,15 +9,16 @@ from tide.ide.source import Tide
 def main(module):
     with WindowManager() as manager:
         with ResourceManager() as resources:
-
-            font = resources.font('DejaVuSansMono.ttf', 18)
-            window = manager.new_window(Tide)
-            window.theme = Theme(font)
-            window.module = module
+            font = resources.font('dejavu/DejaVuSansMono.ttf', 18)
+            t = Theme(font)
 
             window = manager.new_window(Tide)
-            window.theme = Theme(font)
+            window.theme = t
             window.module = module
+
+            # window = manager.new_window(Tide)
+            # window.theme = t
+            # window.module = module
 
             manager.run()
 
